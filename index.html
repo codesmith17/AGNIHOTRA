@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sunrise Sunset Times</title>
+
+
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.8.1/css/all.css">
+    <link rel="stylesheet" href="style.css">
+    <link:scss></link:scss>
+</head>
+
+<body>
+    <nav>
+        <div id="portrait-frame">
+            <img id="portrait" src="https://cdn6.aptoide.com/imgs/6/8/f/68fdb35faa0209f017128af309265ac2_icon.png" alt="">
+            <h1 id="title" class="hf_text">EternalAgni</h1>
+        </div>
+        <div id="nav-items">
+            <input type="checkbox" id="nav-check">
+            <div class="nav-icon">
+                <label for="nav-check">
+                          <span></span>
+                          <span></span>
+                          <span></span>
+                      </label>
+            </div>
+            </input>
+            <ul class="nav-links">
+                <li><a id="home" href="#home" class="nav_link_text">HOME</a></li>
+                <li><a id="work" href="#mantras" class="nav_link_text">MANTRAS</a></li>
+                <li><a id="about" href="#about" class="nav_link_text">ABOUT</a></li>
+                <li><a id="connect" href="#contact" class="nav_link_text">CONNECT</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="content-wrap">
+        <div class="card location-info">
+            <i class="fas fa-map-marker-alt fa-3x"></i>
+            <h2>Your Location</h2>
+
+            <p id="userLocation"></p>
+        </div>
+        <div class="card upcoming-times">
+            <div></div>
+            <div></div>
+            <i class="fas fa-clock fa-3x"></i>
+            <h2 class="section-title">Upcoming Sunrise and Sunset</h2>
+
+            <ul id="upcomingTimes" class="times-list"></ul>
+        </div>
+        <div class="card today-times">
+            <i class="fas fa-sun fa-3x"></i>
+            <h2 class="section-title">Today's Sunrise and Sunset</h2>
+            <ul id="todayTimes" class="times-list"></ul>
+        </div>
+
+        <div class="card tomorrow-times">
+            <i class="fas fa-calendar-alt fa-3x"></i>
+            <h2 class="section-title">Tomorrow's Sunrise and Sunset</h2>
+            <ul id="tomorrowTimes" class="times-list"></ul>
+        </div>
+
+
+    </div>
+    <h2 id="mantras" class="fade-in">Mantras</h2>
+
+    <div class="mantras-section fade-in">
+        <div class="mantra-card">
+            <!-- First audio content -->
+            <audio class="mantra-audio" controls>
+          <source src="Sunrise Agnihotra Mantra.mp3" type="audio/mp3">
+          Your browser does not support the audio element.
+        </audio>
+        </div>
+
+        <div class="mantra-card">
+            <!-- Second audio content -->
+            <audio class="mantra-audio" controls>
+          <source src="Sunset Agnihotra Mantra.mp3" type="audio/mp3">
+          Your browser does not support the audio element.
+        </audio>
+        </div>
+    </div>
+
+
+
+
+
+    <script src="script.js"></script>
+
+</body>
+
+</html>

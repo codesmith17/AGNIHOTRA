@@ -1,0 +1,230 @@
+$bgcolour: #1B2223;
+$navbgcolour: #9CA6BB;
+$navlight: #BFC9DA;
+$textcolour: #111010;
+$accentcolour: #16E0B1;
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    scroll-behavior: auto;
+}
+
+body {
+    background-color: $bgcolour;
+    color: $textcolour;
+    font-family: Monospace;
+}
+
+nav {
+    width: 100%;
+    min-width: 150px;
+    height: 100px;
+    background-color: $navbgcolour;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 2;
+}
+
+#portrait-frame {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    width: 40vw;
+    min-width: 200px;
+    max-width: 470px;
+    height: 100%;
+    justify-content: space-between;
+}
+
+#portrait {
+    width: 95px;
+    clip-path: circle(40%);
+    padding: 0.4rem;
+    margin-left: min(3rem, 12vw);
+    margin-right: 0.5rem;
+}
+
+#title {
+    width: auto;
+    margin-right: 3rem;
+    letter-spacing: 4px;
+    font-size: 30px;
+}
+
+#nav-items {
+    width: 55%;
+    max-width: 650px;
+    min-width: 50px;
+    height: 70px;
+    margin-right: 20px;
+}
+
+.nav-icon,
+#nav-check {
+    display: none;
+}
+
+#nav-items>ul {
+    display: flex;
+    justify-content: space-evenly;
+    align-items: center;
+    height: 100%;
+}
+
+#nav-items>ul>li {
+    list-style-type: none;
+    padding: 0;
+    border: 0;
+    width: 89px;
+    text-align: center;
+    &:nth-of-type(3) {
+        width: 100px;
+    }
+    &:nth-of-type(4) {
+        width: 122px;
+    }
+}
+
+.nav_link_text {
+    text-decoration: none;
+    margin-left: 0px;
+    padding: 0.6rem 0.85rem;
+    display: block;
+    letter-spacing: 1.5px;
+    font-weight: bold;
+    line-height: 2;
+    overflow: hidden;
+    color: $textcolour;
+    font-size: 21px;
+    &:hover {
+        color: #422176;
+    }
+}
+
+#about {
+    padding: 0.6rem 0.8rem;
+}
+
+#connect {
+    padding: 0.6rem 0.75rem;
+    margin-left: -1.5px;
+}
+
+#nav-items>ul>li:hover {
+    background-color: #BFC9DA;
+    border: 6px outset $accentcolour;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.content-wrap {
+    margin-top: 100px;
+}
+
+@media screen and (max-width: 750px) {
+    nav {
+        height: 80px;
+        min-width: 200px;
+    }
+    #title {
+        min-width: 80px;
+        font-size: 18px;
+    }
+    #nav-items {
+        overflow: hidden;
+        margin-left: 1px;
+    }
+    #nav-items>ul {
+        border: 1px solid #352020;
+        display: flex;
+        flex-wrap: wrap;
+    }
+    #nav-items>ul>li {
+        margin: 0;
+        width: 100.5vw;
+        min-width: 200px;
+        padding: 0;
+        height: 59px;
+        border: 1px solid #355845;
+        border-radius: 0;
+        background-color: $navlight;
+        &:nth-of-type(3) {
+            width: 100.5vw;
+        }
+        &:nth-of-type(4) {
+            width: 100.5vw;
+        }
+    }
+    .nav_link_text {
+        overflow: hidden;
+        height: 53px;
+        line-height: 1.45;
+    }
+    #home,
+    #work,
+    #about,
+    #connect {
+        padding: 0.8rem;
+        margin: 0;
+    }
+    #nav-items>ul>li:hover {
+        border: 6px outset $accentcolour;
+        border-radius: 2px;
+        cursor: pointer;
+    }
+    #nav-items>ul>li:hover .nav_link_text {
+        line-height: 0.9;
+    }
+    #portrait {
+        width: 75px;
+        clip-path: circle(37%);
+        padding: 0.4rem;
+        margin-left: min(1.8rem, 12vw);
+        margin-right: 0.8rem;
+    }
+    .nav-icon {
+        display: inline-block;
+        float: right;
+        line-height: 70px;
+    }
+    .nav-icon>label {
+        display: inline-block;
+        width: 50px;
+        height: 50px;
+        padding: 13px;
+        vertical-align: middle;
+    }
+    .nav-icon>label>span {
+        display: block;
+        width: 25px;
+        height: 10px;
+        border-top: 3px solid #254773;
+    }
+    .nav-icon>label:hover {
+        cursor: pointer;
+    }
+    .nav-links {
+        position: absolute;
+        display: block;
+        width: 102%;
+        background-color: #4A3434;
+        transition: height 0.3s step-start;
+        overflow-y: hidden;
+        top: 80px;
+        left: -5px;
+    }
+    .nav_link_text {}
+    #nav-check:not(:checked)~.nav-links {
+        height: 0px;
+    }
+    #nav-check:checked~.nav-links {
+        height: auto;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+}
