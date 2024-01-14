@@ -6,6 +6,7 @@
 }
 
 body {
+  position: relative;
   font-family: Monospace;
 }
 
@@ -110,7 +111,8 @@ nav {
 }
 
 .content-wrap {
-  margin-top: 2000px;
+  position: absolute;
+  top: 15%;
 }
 
 @media screen and (max-width: 750px) {
@@ -277,13 +279,14 @@ body {
 
 .content-wrap {
   width: 60%;
-  margin-top: 30%;
+  margin-top: 10px;
 }
 
 .card {
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   border-radius: 8px;
   padding: 20px;
+  margin-top: 20px;
   margin-bottom: 20px;
   text-align: center;
   /* Center text within the card */
@@ -361,7 +364,10 @@ body {
 /* Add this CSS for the heading */
 
 .mantras-section {
+  position: absolute;
+  top: 150%;
   display: flex;
+  flex-direction: column;
   justify-content: space-between;
   margin-top: 50px;
   /* Adjust as needed */
@@ -390,6 +396,11 @@ body {
 .mantra-audio {
   width: 100%;
   margin-top: 10px;
+}
+
+#mantras {
+  position: absolute;
+  top: 150%;
 }
 
 .fade-in {
