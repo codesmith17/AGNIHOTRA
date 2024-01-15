@@ -59,19 +59,15 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
     if (timeDiffTodaySunrise > 0) {
         console.log(`Today's Sunrise: ${formatDateTime(todaySunriseTime)}`);
         displayCountdownAndTime(element, 'Sunrise', todaySunriseTime, timeDiffTodaySunrise);
+    } else if (timeDiffTomorrowSunrise > 0) {
+        console.log(`Tomorrow's Sunrise: ${formatDateTime(tomorrowSunriseTime)}`);
+        displayCountdownAndTime(element, 'Sunrise', tomorrowSunriseTime, timeDiffTomorrowSunrise);
     }
 
     if (timeDiffTodaySunset > 0) {
         console.log(`Today's Sunset: ${formatDateTime(todaySunsetTime)}`);
         displayCountdownAndTime(element, 'Sunset', todaySunsetTime, timeDiffTodaySunset);
-    }
-
-    if (timeDiffTomorrowSunrise > 0) {
-        console.log(`Tomorrow's Sunrise: ${formatDateTime(tomorrowSunriseTime)}`);
-        displayCountdownAndTime(element, 'Sunrise', tomorrowSunriseTime, timeDiffTomorrowSunrise);
-    }
-
-    if (timeDiffTomorrowSunset > 0) {
+    } else if (timeDiffTomorrowSunset > 0) {
         console.log(`Tomorrow's Sunset: ${formatDateTime(tomorrowSunsetTime)}`);
         displayCountdownAndTime(element, 'Sunset', tomorrowSunsetTime, timeDiffTomorrowSunset);
     }
