@@ -63,7 +63,6 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
         console.log(`Tomorrow's Sunrise: ${formatDateTime(tomorrowSunriseTime)}`);
         displayCountdownAndTime(element, 'Sunrise', tomorrowSunriseTime, timeDiffTomorrowSunrise);
     }
-
     if (timeDiffTodaySunset > 0) {
         console.log(`Today's Sunset: ${formatDateTime(todaySunsetTime)}`);
         displayCountdownAndTime(element, 'Sunset', todaySunsetTime, timeDiffTodaySunset);
