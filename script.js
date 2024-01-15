@@ -154,10 +154,8 @@ function reverseGeocode(latitude, longitude) {
             var data = JSON.parse(request.responseText);
             var location = data.results[0].formatted;
 
-            // Update the userLocation paragraph content
             document.getElementById('userLocation').innerText = `Your Location: ${location}`;
 
-            // Continue with the rest of your code
             getSunriseSunset(latitude, longitude);
         } else if (request.status <= 500) {
             console.log("Unable to reverse geocode! Response code: " + request.status);
@@ -172,7 +170,7 @@ function reverseGeocode(latitude, longitude) {
         console.log("Unable to connect to the server");
     };
 
-    request.send(); // make the request
+    request.send();
 }
 
 function showError(error) {
@@ -199,16 +197,14 @@ document.addEventListener('DOMContentLoaded', function() {
     function scrollToMantras() {
         const mantrasSection = document.getElementById('mantras-section');
 
-        // Use smooth scrolling to the mantras section
         mantrasSection.scrollIntoView({
             behavior: 'smooth'
         });
     }
 
     window.addEventListener('scroll', checkScroll);
-    checkScroll(); // Check on page load
+    checkScroll();
 
-    // Add click event listener to the Mantras link in the navbar
     const mantrasLink = document.getElementById('work');
     mantrasLink.addEventListener('click', scrollToMantras);
 });
