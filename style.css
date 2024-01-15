@@ -273,8 +273,13 @@ body {
 
 .content-wrap {
   width: 60%;
-  margin-top: 10px;
   margin-top: 900px;
+}
+
+@media screen and (max-width: 768px) {
+  .content-wrap {
+    margin-top: 1100px;
+  }
 }
 
 .card {
@@ -360,7 +365,7 @@ body {
 
 .mantras-section {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   justify-content: space-between;
   margin-top: 50px;
   /* Adjust as needed */
@@ -386,9 +391,14 @@ body {
   color: #333;
 }
 
+
+/* Increase audio player size */
+
 .mantra-audio {
-  width: 100%;
-  margin-top: 10px;
+  width: 300px;
+  /* You can adjust the width as needed */
+  height: 50px;
+  /* You can adjust the height as needed */
 }
 
 .fade-in {
