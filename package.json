@@ -1,9 +1,10 @@
 {
-  "name": "agnihotra-cors-proxy",
+  "name": "eternal-agni-agnihotra",
   "version": "1.0.0",
-  "description": "CORS proxy for EternalAgni app to access homatherapie.de API",
-  "main": "cors-proxy.js",
+  "description": "EternalAgni Agnihotra timing app with precise sunrise/sunset times",
+  "main": "index.html",
   "scripts": {
+    "build": "node build.js",
     "start": "node cors-proxy.js",
     "dev": "nodemon cors-proxy.js"
   },
@@ -15,7 +16,7 @@
   "devDependencies": {
     "nodemon": "^3.0.1"
   },
-  "keywords": ["agnihotra", "cors", "proxy", "sunrise", "sunset"],
+  "keywords": ["agnihotra", "cors", "proxy", "sunrise", "sunset", "static-site"],
   "author": "EternalAgni",
   "license": "MIT"
 } 
