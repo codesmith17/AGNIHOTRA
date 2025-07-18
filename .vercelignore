@@ -1,0 +1,11 @@
+node_modules
+.git
+.gitignore
+cors-proxy.js
+build.js
+style.scss
+script2.js
+README.md
+package-lock.json
+netlify
+.qodo 

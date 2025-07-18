@@ -1,18 +1,8 @@
 {
   "version": 2,
   "name": "eternal-agni",
-  "builds": [
-    {
-      "src": "api/agnihotra.js",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/agnihotra",
-      "dest": "/api/agnihotra.js"
-    }
-  ],
+  "buildCommand": "npm run build",
+  "outputDirectory": "public",
   "functions": {
     "api/agnihotra.js": {
       "maxDuration": 10
