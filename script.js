@@ -91,7 +91,7 @@ async function fetchSunriseSunsetData(date, lat, lng) {
         
         // Try deployed proxies first, then local proxy
         const proxyEndpoints = [
-            'https://agnihotra-eternal-agni.vercel.app/',  // Deployed Netlify endpoint
+            'https://agnihotra-eternal-agni.vercel.app/api/agnihotra',         // Deployed Vercel endpoint
             'http://localhost:8080/api/agnihotra'                              // Local development endpoint
         ];
         
