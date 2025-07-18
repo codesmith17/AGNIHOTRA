@@ -31,14 +31,21 @@ async function getSunriseSunset(lat, lng) {
             fetchSunriseSunsetData(tomorrowFormatted, lat, lng)
         ]);
         
-        if (todayData && tomorrowData) {
-            console.log("✅ Got precise timing from homatherapie.de");
-            console.log("Today data:", todayData);
-            console.log("Tomorrow data:", tomorrowData);
+        if (todayData || tomorrowData) {
+            console.log("✅ Got precise timing from homatherapie.de (partial or complete)");
+            if (todayData) console.log("Today data:", todayData);
+            if (tomorrowData) console.log("Tomorrow data:", tomorrowData);
             
-            displaySunriseSunset(todayData, 'todayTimes');
-            displaySunriseSunset(tomorrowData, 'tomorrowTimes');
-            displayUpcomingTimings(todayData, tomorrowData, 'upcomingTimes');
+            // Use homatherapie.de data when available, fallback for missing dates
+            if (todayData && tomorrowData) {
+                displaySunriseSunset(todayData, 'todayTimes');
+                displaySunriseSunset(tomorrowData, 'tomorrowTimes');
+                displayUpcomingTimings(todayData, tomorrowData, 'upcomingTimes');
+            } else {
+                // Partial success - get missing data from fallback API
+                console.log("🔄 Getting missing data from fallback API...");
+                await getSunriseSunsetFromSunAPI(lat, lng, todayData, tomorrowData);
+            }
         } else {
             throw new Error('Failed to fetch precise timing from homatherapie.de');
         }
@@ -130,7 +137,13 @@ async function fetchSunriseSunsetData(date, lat, lng) {
             
             // Extract the line containing the date and times from the HTML response
             const lines = htmlText.split('\n');
-            const rowContent = lines.find(line => line.includes(date));
+            // Look specifically for table row with time data (contains <td> elements with align="right" and HH:MM:SS format)
+            const rowContent = lines.find(line => 
+                line.includes(date) && 
+                line.includes('<td') && 
+                line.includes('align="right"') &&
+                /\d{1,2}:\d{2}:\d{2}/.test(line)
+            );
             
             if (!rowContent) {
                 console.log(`[!] Could not find sunrise/sunset row for ${date}`);
@@ -188,42 +201,55 @@ async function fetchSunriseSunsetData(date, lat, lng) {
 }
 
 // Alternative function using sunrisesunset.io API (provides seconds precision)
-async function getSunriseSunsetFromSunAPI(lat, lng) {
-    const apiUrlToday = `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lng}&date=today`;
-    const apiUrlTomorrow = `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lng}&date=tomorrow`;
-
+async function getSunriseSunsetFromSunAPI(lat, lng, existingTodayData = null, existingTomorrowData = null) {
     try {
         console.log("🌅 Using sunrisesunset.io API (also provides seconds precision)...");
         console.log("ℹ️  Note: This API also provides HH:MM:SS format, suitable for Agnihotra timing");
         
-        const responses = await Promise.all([
-            fetch(apiUrlToday),
-            fetch(apiUrlTomorrow)
-        ]);
+        let todayData = existingTodayData;
+        let tomorrowData = existingTomorrowData;
         
-        const data = await Promise.all(responses.map(response => response.json()));
+        // Only fetch missing data
+        const fetchPromises = [];
+        if (!todayData) {
+            const apiUrlToday = `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lng}&date=today`;
+            fetchPromises.push(fetch(apiUrlToday).then(r => r.json()));
+        } else {
+            fetchPromises.push(Promise.resolve(null));
+        }
         
-        const todayResults = data[0].results;
-        const tomorrowResults = data[1].results;
+        if (!tomorrowData) {
+            const apiUrlTomorrow = `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lng}&date=tomorrow`;
+            fetchPromises.push(fetch(apiUrlTomorrow).then(r => r.json()));
+        } else {
+            fetchPromises.push(Promise.resolve(null));
+        }
+        
+        const [todayResponse, tomorrowResponse] = await Promise.all(fetchPromises);
+        
+        // Use existing data or convert from API response
+        if (!todayData && todayResponse) {
+            const todayResults = todayResponse.results;
+            console.log("✅ SECONDS-PRECISION timing - Today (fallback):", todayResults);
+            todayData = {
+                date: todayResults.date,
+                sunrise: todayResults.sunrise,
+                sunset: todayResults.sunset
+            };
+        }
+        
+        if (!tomorrowData && tomorrowResponse) {
+            const tomorrowResults = tomorrowResponse.results;
+            console.log("✅ SECONDS-PRECISION timing - Tomorrow (fallback):", tomorrowResults);
+            tomorrowData = {
+                date: tomorrowResults.date,
+                sunrise: tomorrowResults.sunrise,
+                sunset: tomorrowResults.sunset
+            };
+        }
 
-        console.log("✅ SECONDS-PRECISION timing - Today:", todayResults);
-        console.log("✅ SECONDS-PRECISION timing - Tomorrow:", tomorrowResults);
-
-        // Convert to format expected by our functions
-        const todayData = {
-            date: todayResults.date,
-            sunrise: todayResults.sunrise,
-            sunset: todayResults.sunset
-        };
-
-        const tomorrowData = {
-            date: tomorrowResults.date,
-            sunrise: tomorrowResults.sunrise,
-            sunset: tomorrowResults.sunset
-        };
-
-        console.log("Formatted Today data:", todayData);
-        console.log("Formatted Tomorrow data:", tomorrowData);
+        console.log("Final Today data:", todayData);
+        console.log("Final Tomorrow data:", tomorrowData);
 
         displaySunriseSunset(todayData, 'todayTimes');
         displaySunriseSunset(tomorrowData, 'tomorrowTimes');
