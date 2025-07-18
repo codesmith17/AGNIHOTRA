@@ -299,13 +299,17 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
     // Find the next upcoming event(s) based on current time
     const upcomingEvents = [];
 
-    // Check what's coming next
+    // Check what's coming next - always show the next 2 upcoming events
     if (currentTime < todaySunriseTime) {
         // Before today's sunrise - show today's sunrise and sunset
         upcomingEvents.push(['Today\'s Sunrise', todaySunriseTime]);
         upcomingEvents.push(['Today\'s Sunset', todaySunsetTime]);
+    } else if (currentTime < todaySunsetTime) {
+        // After today's sunrise but before today's sunset - show today's sunset and tomorrow's sunrise
+        upcomingEvents.push(['Today\'s Sunset', todaySunsetTime]);
+        upcomingEvents.push(['Tomorrow\'s Sunrise', tomorrowSunriseTime]);
     } else {
-        // After today's sunrise has passed - both next events are tomorrow's
+        // After today's sunset - show tomorrow's sunrise and sunset
         upcomingEvents.push(['Tomorrow\'s Sunrise', tomorrowSunriseTime]);
         upcomingEvents.push(['Tomorrow\'s Sunset', tomorrowSunsetTime]);
     }
