@@ -16,7 +16,13 @@ const filesToCopy = [
     'style.css.map',
     '68fdb35faa0209f017128af309265ac2_icon.png',
     'Sunrise Agnihotra Mantra.mp3',
-    'Sunset Agnihotra Mantra.mp3'
+    'Sunset Agnihotra Mantra.mp3',
+    '1110707675-preview.mp4'
+];
+
+// Folders to copy to public directory
+const foldersToCopy = [
+    'favicons'
 ];
 
 // Copy each file
@@ -26,6 +32,30 @@ filesToCopy.forEach(file => {
         console.log(`✅ Copied ${file} to public/`);
     } else {
         console.log(`⚠️  File not found: ${file}`);
+    }
+});
+
+// Copy folders recursively
+function copyDir(src, dest) {
+    if (!fs.existsSync(src)) return;
+    if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+
+    for (let entry of entries) {
+        const srcPath = path.join(src, entry.name);
+        const destPath = path.join(dest, entry.name);
+        if (entry.isDirectory()) {
+            copyDir(srcPath, destPath);
+        } else {
+            fs.copyFileSync(srcPath, destPath);
+        }
+    }
+}
+
+foldersToCopy.forEach(folder => {
+    if (fs.existsSync(folder)) {
+        copyDir(folder, path.join(publicDir, folder));
+        console.log(`✅ Copied folder ${folder} to public/`);
     }
 });
 
