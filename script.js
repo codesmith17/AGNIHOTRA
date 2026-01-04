@@ -6,6 +6,59 @@ function formatDateToDDMMYYYY(date) {
     return `${day}.${month}.${year}`;
 }
 
+const CACHE_KEY = 'agnihotra_timings_cache';
+const CACHE_EXPIRY_MS = 6 * 30 * 24 * 60 * 60 * 1000; // 6 months in milliseconds
+
+// Function to check and get valid cached data
+function getValidCachedData(lat, lng) {
+    const cachedJSON = localStorage.getItem(CACHE_KEY);
+    if (!cachedJSON) return null;
+
+    try {
+        const cache = JSON.parse(cachedJSON);
+        const now = Date.now();
+
+        // 1. Check if older than 6 months
+        if (now - cache.lastUpdated > CACHE_EXPIRY_MS) {
+            console.log("📂 Cache is older than 6 months. Expiring...");
+            return null;
+        }
+
+        // 2. Check if location changed significantly (more than 0.05 degree)
+        const latDiff = Math.abs(cache.lat - lat);
+        const lngDiff = Math.abs(cache.lng - lng);
+        if (latDiff > 0.05 || lngDiff > 0.05) {
+            console.log("📂 Location changed significantly. Expiring cache...");
+            return null;
+        }
+
+        // 3. Check if we have data for today
+        const todayStr = formatDateToDDMMYYYY(new Date());
+        if (!cache.timings || !cache.timings[todayStr]) {
+            console.log("📂 Cache doesn't have data for today. Refreshing...");
+            return null;
+        }
+
+        console.log("✅ Using valid cached timings from localStorage");
+        return cache;
+    } catch (e) {
+        console.error("Error reading cache:", e);
+        return null;
+    }
+}
+
+// Function to save timings to cache
+function saveTimingsToCache(timings, lat, lng) {
+    const cacheData = {
+        lastUpdated: Date.now(),
+        lat: lat,
+        lng: lng,
+        timings: timings
+    };
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
+    console.log(`💾 Saved ${Object.keys(timings).length} days of timings to localStorage`);
+}
+
 // Function to get sunrise and sunset - prioritize homatherapie.de for precise timing
 async function getSunriseSunset(lat, lng) {
     if (!lat || !lng) {
@@ -22,47 +75,71 @@ async function getSunriseSunset(lat, lng) {
         
         const todayFormatted = formatDateToDDMMYYYY(today);
         const tomorrowFormatted = formatDateToDDMMYYYY(tomorrow);
-        
-        console.log(`[*] Fetching precise data for today: ${todayFormatted} and tomorrow: ${tomorrowFormatted}...`);
-        
-        // Try homatherapie.de first for precise timing
-        const [todayData, tomorrowData] = await Promise.all([
-            fetchSunriseSunsetData(todayFormatted, lat, lng),
-            fetchSunriseSunsetData(tomorrowFormatted, lat, lng)
-        ]);
-        
-        if (todayData || tomorrowData) {
-            console.log("✅ Got precise timing from homatherapie.de (partial or complete)");
-            if (todayData) console.log("Today data:", todayData);
-            if (tomorrowData) console.log("Tomorrow data:", tomorrowData);
+
+        // Check cache first
+        const cache = getValidCachedData(lat, lng);
+        if (cache && cache.timings[todayFormatted]) {
+            const todayData = cache.timings[todayFormatted];
+            const tomorrowData = cache.timings[tomorrowFormatted];
             
-            // Use homatherapie.de data when available, fallback for missing dates
+            if (todayData) displaySunriseSunset(todayData, 'todayTimes');
+            if (tomorrowData) displaySunriseSunset(tomorrowData, 'tomorrowTimes');
+            
             if (todayData && tomorrowData) {
-                displaySunriseSunset(todayData, 'todayTimes');
-                displaySunriseSunset(tomorrowData, 'tomorrowTimes');
+                displayUpcomingTimings(todayData, tomorrowData, 'upcomingTimes');
+                // Display the full schedule table from cache
+                displayFullSchedule(cache.timings);
+                return;
+            }
+        }
+        
+        console.log(`[*] Fetching fresh data for the next 6 months...`);
+        
+        // Fetch 6 months of data
+        const endDate = new Date();
+        endDate.setMonth(endDate.getMonth() + 6);
+        const endDateFormatted = formatDateToDDMMYYYY(endDate);
+
+        // Try homatherapie.de first for precise timing (6 month range)
+        const allTimings = await fetchSunriseSunsetData(todayFormatted, lat, lng, endDateFormatted);
+        
+        if (allTimings && Object.keys(allTimings).length > 0) {
+            console.log(`✅ Got ${Object.keys(allTimings).length} days of precise timing from homatherapie.de`);
+            
+            // Save to cache
+            saveTimingsToCache(allTimings, lat, lng);
+            
+            const todayData = allTimings[todayFormatted];
+            const tomorrowData = allTimings[tomorrowFormatted];
+            
+            if (todayData) displaySunriseSunset(todayData, 'todayTimes');
+            if (tomorrowData) displaySunriseSunset(tomorrowData, 'tomorrowTimes');
+            
+            if (todayData && tomorrowData) {
                 displayUpcomingTimings(todayData, tomorrowData, 'upcomingTimes');
             } else {
-                // Partial success - get missing data from fallback API
-                console.log("🔄 Getting missing data from fallback API...");
+                console.log("🔄 Missing some data for today/tomorrow, fetching from fallback...");
                 await getSunriseSunsetFromSunAPI(lat, lng, todayData, tomorrowData);
             }
+
+            // Display the full schedule table
+            displayFullSchedule(allTimings);
         } else {
             throw new Error('Failed to fetch precise timing from homatherapie.de');
         }
         
     } catch (error) {
-        console.error('❌ homatherapie.de API blocked by CORS policy:', error);
-        console.log('🔧 CORS prevents browser access to homatherapie.de API');
-        console.log('💡 Solution: Use server-side proxy or browser extension to access homatherapie.de');
+        console.error('❌ homatherapie.de API blocked or failed:', error);
         console.log('🌅 Using sunrisesunset.io API which also provides seconds precision...');
         await getSunriseSunsetFromSunAPI(lat, lng);
     }
 }
 
-// Function to fetch data from homatherapie.de for a specific date
-async function fetchSunriseSunsetData(date, lat, lng) {
+// Function to fetch data from homatherapie.de for a date range
+async function fetchSunriseSunsetData(date, lat, lng, endDate = null) {
     try {
         const year = date.split('.')[2];
+        const actualEndDate = endDate || date;
         const url = "https://www.homatherapie.de/en/Agnihotra_Zeitenprogramm/results.html";
         
         // Get location name first
@@ -90,9 +167,9 @@ async function fetchSunriseSunsetData(date, lat, lng) {
         formData.append('lat_deg', lat.toString());
         formData.append('lon_deg', lng.toString());
         formData.append('date', date);
-        formData.append('end_date', date);
+        formData.append('end_date', actualEndDate);
         
-        console.log(`[*] Sending precise timing request for date: ${date}`);
+        console.log(`[*] Sending precise timing request for: ${date} to ${actualEndDate}`);
         console.log(`[*] Location: ${locationName}`);
         console.log(`[*] Coordinates: ${lat}, ${lng}`);
         
@@ -133,56 +210,50 @@ async function fetchSunriseSunsetData(date, lat, lng) {
             console.log(`✅ Using proxy: ${proxyUsed}`);
             
             const htmlText = await response.text();
-            console.log(`[*] Response fetched via proxy for ${date}. Searching for row...`);
+            console.log(`[*] Response fetched via proxy. Parsing results...`);
             
-            // Extract the line containing the date and times from the HTML response
+            const timingsMap = {};
             const lines = htmlText.split('\n');
-            // Look specifically for table row with time data (contains <td> elements with align="right" and HH:MM:SS format)
-            const rowContent = lines.find(line => 
-                line.includes(date) && 
-                line.includes('<td') && 
-                line.includes('align="right"') &&
-                /\d{1,2}:\d{2}:\d{2}/.test(line)
-            );
             
-            if (!rowContent) {
-                console.log(`[!] Could not find sunrise/sunset row for ${date}`);
-                return null;
-            }
-            
-            console.log(`[*] Found row content for ${date}: ${rowContent.substring(0, 200)}...`);
-            
-            // Extract sunrise and sunset times with precise HH:MM:SS format
+            // Regex to find dates like DD.MM.YYYY
+            const dateRegex = /(\d{2}\.\d{2}\.\d{4})/;
+            // Regex to find times like HH:MM:SS
             const timeRegex = /\b(\d{1,2}):(\d{2}):(\d{2})\b/g;
-            const times = [];
-            let match;
+
+            lines.forEach(line => {
+                const dateMatch = line.match(dateRegex);
+                if (dateMatch && line.includes('<td') && line.includes('align="right"')) {
+                    const dateFound = dateMatch[1];
+                    const times = [];
+                    let match;
+                    
+                    // Reset regex state for each line
+                    timeRegex.lastIndex = 0;
+                    while ((match = timeRegex.exec(line)) !== null) {
+                        const hour = match[1].padStart(2, '0');
+                        const minute = match[2];
+                        const second = match[3];
+                        times.push(`${hour}:${minute}:${second}`);
+                    }
+
+                    if (times.length >= 2) {
+                        timingsMap[dateFound] = {
+                            date: dateFound,
+                            sunrise: times[0],
+                            sunset: times[1]
+                        };
+                    }
+                }
+            });
             
-            while ((match = timeRegex.exec(rowContent)) !== null) {
-                // Ensure we have proper HH:MM:SS format
-                const hour = match[1].padStart(2, '0');
-                const minute = match[2];
-                const second = match[3];
-                times.push(`${hour}:${minute}:${second}`);
-            }
-            
-            if (!times || times.length < 2) {
-                console.log(`[!] Could not parse sunrise and sunset times from row for ${date}.`);
-                console.log(`[!] Row content: ${rowContent}`);
+            const count = Object.keys(timingsMap).length;
+            if (count === 0) {
+                console.log(`[!] Could not find any sunrise/sunset rows in the response.`);
                 return null;
             }
             
-            const sunrise = times[0];
-            const sunset = times[1];
-            
-            console.log(`✅ Extracted PRECISE homatherapie.de timing for ${date}:`);
-            console.log(`   🌅 Sunrise: ${sunrise} (seconds precision)`);
-            console.log(`   🌇 Sunset: ${sunset} (seconds precision)`);
-            
-            return {
-                date: date,
-                sunrise: sunrise,
-                sunset: sunset
-            };
+            console.log(`✅ Extracted ${count} days of timing from homatherapie.de`);
+            return timingsMap;
             
         } else {
             console.log(`❌ All proxy endpoints failed`);
@@ -266,15 +337,83 @@ async function getSunriseSunsetFromSunAPI(lat, lng, existingTodayData = null, ex
 
 function displaySunriseSunset(results, elementId) {
     const element = document.getElementById(elementId);
+    element.innerHTML = ''; // Clear previous
 
-    const sunriseLi = document.createElement('li');
-    sunriseLi.innerText = `Sunrise: ${results.sunrise}`;
+    // Add Date Header once
+    const dateHeader = document.createElement('div');
+    dateHeader.className = 'card-date-header';
+    dateHeader.innerText = results.date;
+    element.appendChild(dateHeader);
 
-    const sunsetLi = document.createElement('li');
-    sunsetLi.innerText = `Sunset: ${results.sunset}`;
+    const sunriseDiv = document.createElement('div');
+    sunriseDiv.className = 'time-item';
+    sunriseDiv.innerHTML = `
+        <span class="time-label"><i class="fas fa-sun" style="color: #FFD700;"></i> SUNRISE</span>
+        <span class="time-value">${formatTimeToAMPM(results.sunrise)}</span>
+    `;
 
-    element.appendChild(sunriseLi);
-    element.appendChild(sunsetLi);
+    const sunsetDiv = document.createElement('div');
+    sunsetDiv.className = 'time-item';
+    sunsetDiv.innerHTML = `
+        <span class="time-label"><i class="fas fa-moon" style="color: #4B0082;"></i> SUNSET</span>
+        <span class="time-value">${formatTimeToAMPM(results.sunset)}</span>
+    `;
+
+    element.appendChild(sunriseDiv);
+    element.appendChild(sunsetDiv);
+}
+
+function formatTimeToAMPM(timeStr) {
+    if (!timeStr) return '--:--:--';
+    if (timeStr.includes('AM') || timeStr.includes('PM')) return timeStr;
+    
+    const [hours, minutes, seconds] = timeStr.split(':').map(Number);
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const h = hours % 12 || 12;
+    return `${String(h).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')} ${ampm}`;
+}
+
+function displayFullSchedule(timings) {
+    const tableBody = document.getElementById('timingsTableBody');
+    if (!tableBody) return;
+
+    // Show the schedule section
+    const scheduleSection = tableBody.closest('.schedule-section') || tableBody.closest('.schedule-container');
+    if (scheduleSection) {
+        scheduleSection.style.display = 'block';
+    }
+
+    // Clear existing rows
+    tableBody.innerHTML = '';
+
+    // Sort dates
+    const sortedDates = Object.keys(timings).sort((a, b) => {
+        const [dayA, monthA, yearA] = a.split('.').map(Number);
+        const [dayB, monthB, yearB] = b.split('.').map(Number);
+        return new Date(yearA, monthA - 1, dayA) - new Date(yearB, monthB - 1, dayB);
+    });
+
+    // Add rows for each date
+    sortedDates.forEach(dateStr => {
+        const data = timings[dateStr];
+        const row = document.createElement('tr');
+        
+        // Highlight today's row
+        const todayStr = formatDateToDDMMYYYY(new Date());
+        if (dateStr === todayStr) {
+            row.style.backgroundColor = 'rgba(255, 165, 0, 0.2)';
+            row.style.fontWeight = 'bold';
+        }
+
+        row.innerHTML = `
+            <td>${dateStr}</td>
+            <td>${data.sunrise}</td>
+            <td>${data.sunset}</td>
+        `;
+        tableBody.appendChild(row);
+    });
+    
+    console.log(`📊 Displayed ${sortedDates.length} days in the schedule table`);
 }
 
 function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
@@ -384,26 +523,38 @@ function parseDateTime(dateStr, timeStr) {
 window.activeCountdowns = window.activeCountdowns || {};
 
 function displayCountdownAndTime(element, type, time) {
-    const countdownLi = document.createElement('li');
-    const countdownElement = document.createElement('span');
+    const itemDiv = document.createElement('div');
+    itemDiv.className = 'time-item';
     
     // Create a unique ID by removing spaces and special characters
     const uniqueId = type.toLowerCase().replace(/[^a-z0-9]/g, '');
-    countdownElement.id = `${uniqueId}Countdown`;
+    const isSunrise = type.toLowerCase().includes('sunrise');
+    const iconClass = isSunrise ? 'fas fa-sun' : 'fas fa-moon';
+    const iconColor = isSunrise ? '#FFD700' : '#4B0082';
+    
+    itemDiv.innerHTML = `
+        <span class="time-label"><i class="${iconClass}" style="color: ${iconColor};"></i> ${type.toUpperCase()}</span>
+        <span id="${uniqueId}Countdown" class="countdown-value">--h --m --s</span>
+        <span class="time-secondary">at ${formatDateTimeToTimeOnly(time)}</span>
+    `;
 
-    countdownLi.innerText = `${type} Countdown: `;
-    countdownLi.appendChild(countdownElement);
-    element.appendChild(countdownLi);
+    element.appendChild(itemDiv);
 
     // Store countdown data globally
     window.activeCountdowns[uniqueId] = time;
 
     // Start the countdown immediately
     updateCountdown(uniqueId, time);
+}
 
-    const timeLi = document.createElement('li');
-    timeLi.innerText = `${type}: ${formatDateTime(time)}`;
-    element.appendChild(timeLi);
+function formatDateTimeToTimeOnly(time) {
+    const date = new Date(time);
+    const hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const h = hours % 12 || 12;
+    return `${String(h).padStart(2, '0')}:${minutes}:${seconds} ${ampm}`;
 }
 
 // Global countdown updater - runs every second
@@ -480,27 +631,49 @@ async function getLocation() {
 
 async function reverseGeocode(latitude, longitude) {
     try {
-        // Use a free reverse geocoding service
-        const response = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
+        console.log(`🔍 Getting precise address for coordinates: ${latitude}, ${longitude}`);
+        
+        // Use Nominatim (OpenStreetMap) for more precise address details
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`, {
+            headers: {
+                'Accept-Language': 'en'
+            }
+        });
         
         if (response.ok) {
             const data = await response.json();
-            const location = `${data.city || data.locality || 'Unknown City'}, ${data.principalSubdivision || 'Unknown State'}, ${data.countryName || 'Unknown Country'}`;
+            console.log('📍 Full address data received:', data);
+            
+            // Extract a clean, precise address
+            const address = data.display_name;
+            const shortAddress = address.split(',').slice(0, 4).join(',').trim(); // Get first few parts for cleaner display
+            
+            document.getElementById('userLocation').innerHTML = `
+                <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Detected Address:</span>
+                <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">${address}</span>
+            `;
 
-            document.getElementById('userLocation').innerText = `Your Location: ${location}`;
+            console.log(`📍 Precise location resolved: ${address}`);
 
             // Call the async getSunriseSunset function
             await getSunriseSunset(latitude, longitude);
         } else {
-            console.log("Unable to reverse geocode! Response code: " + response.status);
-            // Fall back to coordinates display
-            document.getElementById('userLocation').innerText = `Your Location: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-            await getSunriseSunset(latitude, longitude);
+            console.log("Nominatim failed, falling back to BigDataCloud...");
+            // Fallback to original BigDataCloud service if Nominatim fails
+            const bdcResponse = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
+            if (bdcResponse.ok) {
+                const bdcData = await bdcResponse.json();
+                const location = `${bdcData.city || bdcData.locality || 'Unknown City'}, ${bdcData.principalSubdivision || 'Unknown State'}, ${bdcData.countryName || 'Unknown Country'}`;
+                document.getElementById('userLocation').innerText = `Your Location: ${location}`;
+                await getSunriseSunset(latitude, longitude);
+            } else {
+                throw new Error("All geocoding services failed");
+            }
         }
     } catch (error) {
-        console.log("Unable to connect to the reverse geocoding server:", error);
-        // Fall back to coordinates display but use precise location for sunrise/sunset
-        document.getElementById('userLocation').innerText = `Your Location: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+        console.log("Geocoding failed:", error);
+        // Fall back to coordinates display
+        document.getElementById('userLocation').innerText = `Your Location: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
         await getSunriseSunset(latitude, longitude);
     }
     
@@ -662,7 +835,4 @@ document.addEventListener('DOMContentLoaded', function() {
 
     window.addEventListener('scroll', checkScroll);
     checkScroll();
-
-    const mantrasLink = document.getElementById('work');
-    mantrasLink.addEventListener('click', scrollToMantras);
 });
