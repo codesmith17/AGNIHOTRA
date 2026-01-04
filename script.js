@@ -20,7 +20,6 @@ function getValidCachedData(lat, lng) {
 
         // 1. Check if older than 6 months
         if (now - cache.lastUpdated > CACHE_EXPIRY_MS) {
-            console.log("📂 Cache is older than 6 months. Expiring...");
             return null;
         }
 
@@ -28,18 +27,15 @@ function getValidCachedData(lat, lng) {
         const latDiff = Math.abs(cache.lat - lat);
         const lngDiff = Math.abs(cache.lng - lng);
         if (latDiff > 0.05 || lngDiff > 0.05) {
-            console.log("📂 Location changed significantly. Expiring cache...");
             return null;
         }
 
         // 3. Check if we have data for today
         const todayStr = formatDateToDDMMYYYY(new Date());
         if (!cache.timings || !cache.timings[todayStr]) {
-            console.log("📂 Cache doesn't have data for today. Refreshing...");
             return null;
         }
 
-        console.log("✅ Using valid cached timings from localStorage");
         return cache;
     } catch (e) {
         console.error("Error reading cache:", e);
@@ -56,7 +52,6 @@ function saveTimingsToCache(timings, lat, lng) {
         timings: timings
     };
     localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
-    console.log(`💾 Saved ${Object.keys(timings).length} days of timings to localStorage`);
 }
 
 // Function to get sunrise and sunset - prioritize homatherapie.de for precise timing
@@ -65,8 +60,6 @@ async function getSunriseSunset(lat, lng) {
         console.error('❌ No coordinates provided to getSunriseSunset');
         return;
     }
-    
-    console.log(`🌅 Getting precise sunrise/sunset for coordinates: ${lat}, ${lng}`);
     
     try {
         const today = new Date();
@@ -93,8 +86,6 @@ async function getSunriseSunset(lat, lng) {
             }
         }
         
-        console.log(`[*] Fetching fresh data for the next 6 months...`);
-        
         // Fetch 6 months of data
         const endDate = new Date();
         endDate.setMonth(endDate.getMonth() + 6);
@@ -104,8 +95,6 @@ async function getSunriseSunset(lat, lng) {
         const allTimings = await fetchSunriseSunsetData(todayFormatted, lat, lng, endDateFormatted);
         
         if (allTimings && Object.keys(allTimings).length > 0) {
-            console.log(`✅ Got ${Object.keys(allTimings).length} days of precise timing from homatherapie.de`);
-            
             // Save to cache
             saveTimingsToCache(allTimings, lat, lng);
             
@@ -118,7 +107,6 @@ async function getSunriseSunset(lat, lng) {
             if (todayData && tomorrowData) {
                 displayUpcomingTimings(todayData, tomorrowData, 'upcomingTimes');
             } else {
-                console.log("🔄 Missing some data for today/tomorrow, fetching from fallback...");
                 await getSunriseSunsetFromSunAPI(lat, lng, todayData, tomorrowData);
             }
 
@@ -130,7 +118,6 @@ async function getSunriseSunset(lat, lng) {
         
     } catch (error) {
         console.error('❌ homatherapie.de API blocked or failed:', error);
-        console.log('🌅 Using sunrisesunset.io API which also provides seconds precision...');
         await getSunriseSunsetFromSunAPI(lat, lng);
     }
 }
@@ -146,18 +133,14 @@ async function fetchSunriseSunsetData(date, lat, lng, endDate = null) {
         let locationName = `${lat.toFixed(4)}, ${lng.toFixed(4)}`; // Fallback to coordinates
         
         try {
-            console.log(`🔍 Getting location name for coordinates: ${lat}, ${lng}`);
             const response = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`);
             
             if (response.ok) {
                 const data = await response.json();
                 locationName = `${data.city || data.locality || 'Unknown'}, ${data.principalSubdivision || data.countryName || 'Unknown'}`;
-                console.log(`📍 Location name resolved: ${locationName}`);
-            } else {
-                console.log('Could not resolve location name, using coordinates');
             }
         } catch (geoError) {
-            console.log('Reverse geocoding failed, using coordinates:', geoError);
+            // Silently fail geo-naming
         }
         
         // Create form data
@@ -168,10 +151,6 @@ async function fetchSunriseSunsetData(date, lat, lng, endDate = null) {
         formData.append('lon_deg', lng.toString());
         formData.append('date', date);
         formData.append('end_date', actualEndDate);
-        
-        console.log(`[*] Sending precise timing request for: ${date} to ${actualEndDate}`);
-        console.log(`[*] Location: ${locationName}`);
-        console.log(`[*] Coordinates: ${lat}, ${lng}`);
         
         // Try deployed proxies first, then local proxy
         const proxyEndpoints = [
@@ -184,8 +163,6 @@ async function fetchSunriseSunsetData(date, lat, lng, endDate = null) {
         
         for (const endpoint of proxyEndpoints) {
             try {
-                console.log(`[*] Trying proxy endpoint: ${endpoint}`);
-                
                 response = await fetch(endpoint, {
                     method: 'POST',
                     headers: {
@@ -196,21 +173,16 @@ async function fetchSunriseSunsetData(date, lat, lng, endDate = null) {
                 
                 if (response.ok) {
                     proxyUsed = endpoint;
-                    console.log(`✅ Connected to proxy: ${endpoint}`);
                     break;
                 }
                 
             } catch (proxyError) {
-                console.log(`❌ Proxy ${endpoint} failed:`, proxyError.message);
                 continue;
             }
         }
         
         if (response && response.ok) {
-            console.log(`✅ Using proxy: ${proxyUsed}`);
-            
             const htmlText = await response.text();
-            console.log(`[*] Response fetched via proxy. Parsing results...`);
             
             const timingsMap = {};
             const lines = htmlText.split('\n');
@@ -248,18 +220,12 @@ async function fetchSunriseSunsetData(date, lat, lng, endDate = null) {
             
             const count = Object.keys(timingsMap).length;
             if (count === 0) {
-                console.log(`[!] Could not find any sunrise/sunset rows in the response.`);
                 return null;
             }
             
-            console.log(`✅ Extracted ${count} days of timing from homatherapie.de`);
             return timingsMap;
             
         } else {
-            console.log(`❌ All proxy endpoints failed`);
-            console.log(`💡 To get precise homatherapie.de timing, use deployment or run local proxy`);
-            console.log(`🔄 Falling back to browser-compatible API...`);
-            
             // Since we can't reliably access homatherapie.de from browser,
             // we'll return null to trigger fallback to sunrisesunset.io
             throw new Error('All proxy endpoints failed. Browser CORS policy prevents direct access to homatherapie.de API.');
@@ -274,9 +240,6 @@ async function fetchSunriseSunsetData(date, lat, lng, endDate = null) {
 // Alternative function using sunrisesunset.io API (provides seconds precision)
 async function getSunriseSunsetFromSunAPI(lat, lng, existingTodayData = null, existingTomorrowData = null) {
     try {
-        console.log("🌅 Using sunrisesunset.io API (also provides seconds precision)...");
-        console.log("ℹ️  Note: This API also provides HH:MM:SS format, suitable for Agnihotra timing");
-        
         let todayData = existingTodayData;
         let tomorrowData = existingTomorrowData;
         
@@ -301,7 +264,6 @@ async function getSunriseSunsetFromSunAPI(lat, lng, existingTodayData = null, ex
         // Use existing data or convert from API response
         if (!todayData && todayResponse) {
             const todayResults = todayResponse.results;
-            console.log("✅ SECONDS-PRECISION timing - Today (fallback):", todayResults);
             todayData = {
                 date: todayResults.date,
                 sunrise: todayResults.sunrise,
@@ -311,16 +273,12 @@ async function getSunriseSunsetFromSunAPI(lat, lng, existingTodayData = null, ex
         
         if (!tomorrowData && tomorrowResponse) {
             const tomorrowResults = tomorrowResponse.results;
-            console.log("✅ SECONDS-PRECISION timing - Tomorrow (fallback):", tomorrowResults);
             tomorrowData = {
                 date: tomorrowResults.date,
                 sunrise: tomorrowResults.sunrise,
                 sunset: tomorrowResults.sunset
             };
         }
-
-        console.log("Final Today data:", todayData);
-        console.log("Final Tomorrow data:", tomorrowData);
 
         displaySunriseSunset(todayData, 'todayTimes');
         displaySunriseSunset(tomorrowData, 'tomorrowTimes');
@@ -412,8 +370,6 @@ function displayFullSchedule(timings) {
         `;
         tableBody.appendChild(row);
     });
-    
-    console.log(`📊 Displayed ${sortedDates.length} days in the schedule table`);
 }
 
 function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
@@ -425,11 +381,6 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
     const todaySunsetTime = parseDateTime(todayResults.date, todayResults.sunset);
     const tomorrowSunriseTime = parseDateTime(tomorrowResults.date, tomorrowResults.sunrise);
     const tomorrowSunsetTime = parseDateTime(tomorrowResults.date, tomorrowResults.sunset);
-
-    console.log("Current time:", new Date(currentTime));
-    console.log("Today sunrise:", new Date(todaySunriseTime));
-    console.log("Today sunset:", new Date(todaySunsetTime));
-    console.log("Tomorrow sunrise:", new Date(tomorrowSunriseTime));
 
     // Clear previous content and countdowns
     element.innerHTML = '';
@@ -453,8 +404,6 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
         upcomingEvents.push(['Tomorrow\'s Sunset', tomorrowSunsetTime]);
     }
 
-    console.log("Showing upcoming events:", upcomingEvents);
-
     // Display the upcoming events
     upcomingEvents.forEach(([eventName, eventTime]) => {
         displayCountdownAndTime(element, eventName, eventTime);
@@ -463,8 +412,6 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
 
 // Helper function to parse date and time into timestamp
 function parseDateTime(dateStr, timeStr) {
-    console.log("Parsing date:", dateStr, "time:", timeStr);
-    
     // Handle both DD.MM.YYYY and YYYY-MM-DD formats
     let day, month, year;
     
@@ -515,7 +462,6 @@ function parseDateTime(dateStr, timeStr) {
     // Create date object (month is 0-indexed in JavaScript)
     const date = new Date(year, month - 1, day, hours, minutes, seconds);
     
-    console.log(`✅ Parsed with SECONDS precision: ${date.toLocaleString()} (${hours}:${minutes}:${seconds})`);
     return date.getTime();
 }
 
@@ -624,15 +570,12 @@ async function getLocation() {
     } else {
         document.getElementById('userLocation').innerText = "Geolocation not supported. Getting approximate location...";
         // Try to get approximate location using IP-based geolocation
-        console.log('Geolocation not supported, trying IP-based geolocation...');
         await getApproximateLocation();
     }
 }
 
 async function reverseGeocode(latitude, longitude) {
     try {
-        console.log(`🔍 Getting precise address for coordinates: ${latitude}, ${longitude}`);
-        
         // Use Nominatim (OpenStreetMap) for more precise address details
         const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`, {
             headers: {
@@ -642,7 +585,6 @@ async function reverseGeocode(latitude, longitude) {
         
         if (response.ok) {
             const data = await response.json();
-            console.log('📍 Full address data received:', data);
             
             // Extract a clean, precise address
             const address = data.display_name;
@@ -653,12 +595,9 @@ async function reverseGeocode(latitude, longitude) {
                 <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">${address}</span>
             `;
 
-            console.log(`📍 Precise location resolved: ${address}`);
-
             // Call the async getSunriseSunset function
             await getSunriseSunset(latitude, longitude);
         } else {
-            console.log("Nominatim failed, falling back to BigDataCloud...");
             // Fallback to original BigDataCloud service if Nominatim fails
             const bdcResponse = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
             if (bdcResponse.ok) {
@@ -671,7 +610,6 @@ async function reverseGeocode(latitude, longitude) {
             }
         }
     } catch (error) {
-        console.log("Geocoding failed:", error);
         // Fall back to coordinates display
         document.getElementById('userLocation').innerText = `Your Location: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
         await getSunriseSunset(latitude, longitude);
@@ -686,8 +624,6 @@ async function reverseGeocode(latitude, longitude) {
 
 async function reverseGeocodeApproximate(latitude, longitude) {
     try {
-        console.log(`Reverse geocoding approximate coordinates: ${latitude}, ${longitude}`);
-        
         // Use the same reverse geocoding service but mark as approximate
         const response = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
         
@@ -696,18 +632,15 @@ async function reverseGeocodeApproximate(latitude, longitude) {
             const location = `${data.city || data.locality || 'Unknown City'}, ${data.principalSubdivision || 'Unknown State'}, ${data.countryName || 'Unknown Country'}`;
 
             document.getElementById('userLocation').innerText = `Your Location: ${location} (approximate)`;
-            console.log(`Identified approximate location: ${location}`);
 
             // Call the async getSunriseSunset function with approximate coordinates
             await getSunriseSunset(latitude, longitude);
         } else {
-            console.log("Unable to reverse geocode approximate location! Response code: " + response.status);
             // Fall back to coordinates display
             document.getElementById('userLocation').innerText = `Your Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)} (approximate)`;
             await getSunriseSunset(latitude, longitude);
         }
     } catch (error) {
-        console.log("Unable to connect to reverse geocoding server for approximate location:", error);
         // Fall back to coordinates display but continue with sunrise/sunset
         document.getElementById('userLocation').innerText = `Your Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)} (approximate)`;
         await getSunriseSunset(latitude, longitude);
@@ -721,7 +654,6 @@ async function reverseGeocodeApproximate(latitude, longitude) {
 }
 
 async function getApproximateLocation() {
-    console.log('🌍 Starting IP-based approximate location detection...');
     try {
         // Try multiple IP geolocation services to get coordinates only
         const services = [
@@ -736,12 +668,10 @@ async function getApproximateLocation() {
         
         for (const service of services) {
             try {
-                console.log(`Trying IP geolocation service: ${service}`);
                 const response = await fetch(service);
                 
                 if (response.ok) {
                     const data = await response.json();
-                    console.log('IP geolocation response:', data);
                     
                     // Extract only coordinates from different API response formats
                     if (data.latitude && data.longitude) {
@@ -750,7 +680,6 @@ async function getApproximateLocation() {
                             lat: parseFloat(data.latitude),
                             lng: parseFloat(data.longitude)
                         };
-                        console.log(`Service ${service} returned coordinates: ${coordinates.lat}, ${coordinates.lng}`);
                         break;
                     } else if (data.lat && data.lon) {
                         // Alternative lat/lon format
@@ -758,21 +687,15 @@ async function getApproximateLocation() {
                             lat: parseFloat(data.lat),
                             lng: parseFloat(data.lon)
                         };
-                        console.log(`Service ${service} returned coordinates: ${coordinates.lat}, ${coordinates.lng}`);
                         break;
-                    } else {
-                        console.log(`Service ${service} did not return usable coordinates. Response:`, data);
                     }
                 }
             } catch (serviceError) {
-                console.log(`Service ${service} failed:`, serviceError);
                 continue; // Try next service
             }
         }
 
         if (coordinates) {
-            console.log(`Got approximate coordinates: ${coordinates.lat}, ${coordinates.lng}`);
-            
             // Update location text to show we're identifying the place
             document.getElementById('userLocation').innerText = `Identifying location... (${coordinates.lat.toFixed(2)}, ${coordinates.lng.toFixed(2)})`;
             
@@ -786,7 +709,6 @@ async function getApproximateLocation() {
         console.error('IP geolocation failed:', error);
         // No fallback coordinates - require user to enable location
         document.getElementById('userLocation').innerText = `❌ Unable to detect location. Please refresh and allow location access for Agnihotra times.`;
-        console.log('❌ All location detection methods failed. Cannot provide sunrise/sunset times without location.');
         
         // Add a note about enabling location
         const upcomingElement = document.getElementById('upcomingTimes');
@@ -806,7 +728,6 @@ async function showError(error) {
     document.getElementById('userLocation').innerText = `Getting approximate location...`;
     
     // Try to get approximate location using IP-based geolocation
-    console.log('Precise location denied, trying IP-based geolocation...');
     await getApproximateLocation();
 }
 
