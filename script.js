@@ -1,3 +1,178 @@
+// --- Astronomical Calculation (Homatherapy Germany Style) ---
+/**
+ * IMPORTANT NOTE ON AGNIHOTRA TIMINGS:
+ * Agnihotra sunrise/sunset is DIFFERENT from the "actual" (visual) sunrise/sunset seen in news or weather apps.
+ * 
+ * 1. VISUAL SUNRISE: Occurs when the top edge (upper limb) of the sun appears on the horizon. 
+ *    Calculated at altitude -0.833° to account for atmospheric refraction and the sun's radius.
+ * 
+ * 2. AGNIHOTRA SUNRISE: Occurs when the CENTER of the sun's disk is exactly on the mathematical horizon.
+ *    Calculated at altitude 0.0° with NO atmospheric refraction.
+ * 
+ * This is why Agnihotra timings may differ by 2-4 minutes from standard weather reports.
+ * High-precision Agnihotra timing calculation based on Meeus/NOAA SPA.
+ */
+function calculateAgnihotraTiming(dateUTC, lat, lon, tzHours) {
+    const degreesToRadians = Math.PI / 180;
+    const radiansToDegrees = 180 / Math.PI;
+
+    /**
+     * Internal helper to compute sun details for a specific timestamp.
+     * Sources: 
+     * - Jean Meeus, "Astronomical Algorithms" (2nd Ed.)
+     * - NOAA Solar Calculation Details: https://gml.noaa.gov/grad/solcalc/calcdetails.html
+     */
+    function getSunDetails(timestampUTC) {
+        /** 
+         * 1. TIME & EPOCH
+         * julianDay: A continuous count of days since 4713 BCE. Standardizes time across eras. (Meeus Ch. 7)
+         */
+        const julianDay = timestampUTC / 86400000 + 2440587.5;
+        /** 
+         * julianCentury: Number of 100-year blocks since Jan 1, 2000. Tracks secular orbital drift. (Meeus Eq. 25.1)
+         */
+        const julianCentury = (julianDay - 2451545.0) / 36525;
+
+        /** 
+         * 2. ORBITAL POSITION
+         * sunGeometricMeanLongitude: The Sun's "average" position if Earth's orbit were a circle. (Meeus Eq. 25.2)
+         */
+        let sunGeometricMeanLongitude = 280.46646 + julianCentury * (36000.76983 + 0.0003032 * julianCentury);
+        sunGeometricMeanLongitude = ((sunGeometricMeanLongitude % 360) + 360) % 360;
+
+        /** 
+         * sunMeanAnomaly: Earth's "starting point" in its loop relative to Perihelion (closest point to Sun). (Meeus Eq. 25.3)
+         */
+        const sunMeanAnomaly = 357.52911 + julianCentury * (35999.05029 - 0.0001537 * julianCentury);
+
+        /** 
+         * earthOrbitEccentricity: Measures how "oval" Earth's orbit is (changes slightly every century). (Meeus Eq. 25.4)
+         */
+        const earthOrbitEccentricity = 0.016708634 - julianCentury * (0.000042037 + 0.0000001267 * julianCentury);
+
+        /** 
+         * 3. CORRECTIONS & ACCURACY
+         * sunEquationOfCenter: Keplerian correction for Earth's non-uniform speed in its oval orbit. (Meeus Ch. 25)
+         */
+        const sunEquationOfCenter = Math.sin(degreesToRadians * sunMeanAnomaly) * (1.914602 - julianCentury * (0.004817 + 0.000014 * julianCentury)) +
+                  Math.sin(degreesToRadians * 2 * sunMeanAnomaly) * (0.019993 - 0.000101 * julianCentury) +
+                  Math.sin(degreesToRadians * 3 * sunMeanAnomaly) * 0.000289;
+
+        /** 
+         * sunTrueLongitude: The exact physical position of the Sun after orbital speed correction.
+         */
+        const sunTrueLongitude = sunGeometricMeanLongitude + sunEquationOfCenter;
+
+        /** 
+         * moonAscendingNodeLongitude: Tracks Moon's position to calculate Nutation (Earth's axis wobble).
+         */
+        const moonAscendingNodeLongitude = 125.04 - 1934.136 * julianCentury;
+        
+        /** 
+         * sunApparentLongitude: Sun's apparent position from Earth, correcting for wobble and light time.
+         */
+        const sunApparentLongitude = sunTrueLongitude - 0.00569 - 0.00478 * Math.sin(degreesToRadians * moonAscendingNodeLongitude);
+
+        /** 
+         * 4. EARTH'S TILT (SEASONS)
+         * meanObliquityOfEcliptic: Average tilt of Earth's axis (~23.44°). (Meeus Eq. 22.2)
+         */
+        const meanObliquityOfEcliptic = 23 + (26 + (21.448 - julianCentury * (46.815 + julianCentury * (0.00059 - julianCentury * 0.001813))) / 60) / 60;
+        
+        /** 
+         * correctedObliquityOfEcliptic: Precise axis tilt at this exact moment, including Moon's wobble.
+         */
+        const correctedObliquityOfEcliptic = meanObliquityOfEcliptic + 0.00256 * Math.cos(degreesToRadians * moonAscendingNodeLongitude);
+
+        /** 
+         * sunApparentDeclination: The "height" of the Sun relative to the Equator. Determines day length.
+         */
+        const sunApparentDeclination = Math.asin(Math.sin(degreesToRadians * correctedObliquityOfEcliptic) * Math.sin(degreesToRadians * sunApparentLongitude));
+
+        /** 
+         * 5. TIMING
+         * equationOfTime: Fixes the gap between "Sundial Time" and "Clock Time" caused by Earth's variable speed. (Meeus Ch. 28)
+         */
+        const tangentSquaredObliquity = Math.pow(Math.tan(degreesToRadians * (correctedObliquityOfEcliptic / 2)), 2);
+        const equationOfTime = 4 * radiansToDegrees * (tangentSquaredObliquity * Math.sin(2 * degreesToRadians * sunGeometricMeanLongitude) - 
+                    2 * earthOrbitEccentricity * Math.sin(degreesToRadians * sunMeanAnomaly) + 
+                    4 * earthOrbitEccentricity * tangentSquaredObliquity * Math.sin(degreesToRadians * sunMeanAnomaly) * Math.cos(2 * degreesToRadians * sunGeometricMeanLongitude) - 
+                    0.5 * tangentSquaredObliquity * tangentSquaredObliquity * Math.sin(4 * degreesToRadians * sunGeometricMeanLongitude) - 1.25 * earthOrbitEccentricity * earthOrbitEccentricity * Math.sin(2 * degreesToRadians * sunMeanAnomaly));
+
+        return { sunApparentDeclination, equationOfTime };
+    }
+
+    /**
+     * ITERATIVE REFINEMENT
+     * Agnihotra requires exact sunrise/sunset. Since the Sun's position changes 
+     * between solar noon and the horizon event, we perform a second pass 
+     * to recalculate the Sun's state at the estimated event time.
+     */
+    let initialSunDetails = getSunDetails(dateUTC.getTime());
+    
+    // Hour Angle for altitude = 0° (Mathematical Horizon): 
+    // cos(H) = (sin(h) - sin(lat)*sin(delta)) / (cos(lat)*cos(delta))
+    // For Agnihotra h=0, so sin(h)=0. Simplifies to: -tan(lat)*tan(delta)
+    const cosineOfHourAngle = -Math.tan(lat * degreesToRadians) * Math.tan(initialSunDetails.sunApparentDeclination);
+    
+    // Handle polar day/night
+    if (cosineOfHourAngle < -1 || cosineOfHourAngle > 1) return null;
+
+    const hourAngle = Math.acos(cosineOfHourAngle) * radiansToDegrees;
+    const solarNoonAtNoonDetails = 12 + tzHours - lon / 15 - initialSunDetails.equationOfTime / 60;
+    
+    // Pass 2: Refine Sunrise
+    const approximateSunriseUTC = dateUTC.getTime() + (solarNoonAtNoonDetails - hourAngle / 15 - tzHours) * 3600000;
+    const sunriseDetails = getSunDetails(approximateSunriseUTC);
+    const refinedHourAngleSunrise = Math.acos(-Math.tan(lat * degreesToRadians) * Math.tan(sunriseDetails.sunApparentDeclination)) * radiansToDegrees;
+    const refinedSunrise = (12 + tzHours - lon / 15 - sunriseDetails.equationOfTime / 60) - refinedHourAngleSunrise / 15;
+
+    // Pass 2: Refine Sunset
+    const approximateSunsetUTC = dateUTC.getTime() + (solarNoonAtNoonDetails + hourAngle / 15 - tzHours) * 3600000;
+    const sunsetDetails = getSunDetails(approximateSunsetUTC);
+    const refinedHourAngleSunset = Math.acos(-Math.tan(lat * degreesToRadians) * Math.tan(sunsetDetails.sunApparentDeclination)) * radiansToDegrees;
+    const refinedSunset = (12 + tzHours - lon / 15 - sunsetDetails.equationOfTime / 60) + refinedHourAngleSunset / 15;
+
+    return { sunrise: refinedSunrise, sunset: refinedSunset };
+}
+
+// Convert decimal hours to HH:MM:SS with exact rounding
+function formatHoursToHMS(h) {
+    if (h === null) return "--:--:--";
+    let sec = Math.round(h * 3600);
+    sec = (sec + 86400) % 86400;
+    const hh = Math.floor(sec / 3600);
+    const mm = Math.floor((sec % 3600) / 60);
+    const ss = sec % 60;
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+// Function to generate local 6-month timings
+function generateLocal6MonthTimings(lat, lng) {
+    const timingsMap = {};
+    const tzOffsetHours = - (new Date().getTimezoneOffset() / 60);
+    const startDate = new Date();
+    
+    for (let i = 0; i < 183; i++) { // Approx 6 months
+        const currentDate = new Date(startDate);
+        currentDate.setDate(startDate.getDate() + i);
+        
+        // Use UTC date for consistent astronomical calculation
+        const dateUTC = new Date(Date.UTC(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()));
+        const timings = calculateAgnihotraTiming(dateUTC, lat, lng, tzOffsetHours);
+        
+        if (timings) {
+            const dateStr = formatDateToDDMMYYYY(currentDate);
+            timingsMap[dateStr] = {
+                date: dateStr,
+                sunrise: formatHoursToHMS(timings.sunrise),
+                sunset: formatHoursToHMS(timings.sunset)
+            };
+        }
+    }
+    return timingsMap;
+}
+
 // Function to format date to DD.MM.YYYY format
 function formatDateToDDMMYYYY(date) {
     const day = String(date.getDate()).padStart(2, '0');
@@ -54,7 +229,7 @@ function saveTimingsToCache(timings, lat, lng) {
     localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
 }
 
-// Function to get sunrise and sunset - prioritize homatherapie.de for precise timing
+// Function to get sunrise and sunset - prioritize local precise calculation
 async function getSunriseSunset(lat, lng) {
     if (!lat || !lng) {
         console.error('❌ No coordinates provided to getSunriseSunset');
@@ -69,7 +244,7 @@ async function getSunriseSunset(lat, lng) {
         const todayFormatted = formatDateToDDMMYYYY(today);
         const tomorrowFormatted = formatDateToDDMMYYYY(tomorrow);
 
-        // Check cache first
+        // 1. Check cache first
         const cache = getValidCachedData(lat, lng);
         if (cache && cache.timings[todayFormatted]) {
             const todayData = cache.timings[todayFormatted];
@@ -80,19 +255,22 @@ async function getSunriseSunset(lat, lng) {
             
             if (todayData && tomorrowData) {
                 displayUpcomingTimings(todayData, tomorrowData, 'upcomingTimes');
-                // Display the full schedule table from cache
                 displayFullSchedule(cache.timings);
                 return;
             }
         }
         
-        // Fetch 6 months of data
-        const endDate = new Date();
-        endDate.setMonth(endDate.getMonth() + 6);
-        const endDateFormatted = formatDateToDDMMYYYY(endDate);
-
-        // Try homatherapie.de first for precise timing (6 month range)
-        const allTimings = await fetchSunriseSunsetData(todayFormatted, lat, lng, endDateFormatted);
+        // 2. Primary Method: Local High-Precision Astronomical Calculation
+        // This reproduces Homatherapy Germany timings locally
+        let allTimings = generateLocal6MonthTimings(lat, lng);
+        
+        // 3. Fallback Method: Scrape from homatherapie.de if local calculation isn't enough or as a secondary check
+        if (!allTimings || Object.keys(allTimings).length === 0) {
+            const endDate = new Date();
+            endDate.setMonth(endDate.getMonth() + 6);
+            const endDateFormatted = formatDateToDDMMYYYY(endDate);
+            allTimings = await fetchSunriseSunsetData(todayFormatted, lat, lng, endDateFormatted);
+        }
         
         if (allTimings && Object.keys(allTimings).length > 0) {
             // Save to cache
@@ -107,17 +285,18 @@ async function getSunriseSunset(lat, lng) {
             if (todayData && tomorrowData) {
                 displayUpcomingTimings(todayData, tomorrowData, 'upcomingTimes');
             } else {
+                // Second Fallback: sunrisesunset.io
                 await getSunriseSunsetFromSunAPI(lat, lng, todayData, tomorrowData);
             }
 
             // Display the full schedule table
             displayFullSchedule(allTimings);
         } else {
-            throw new Error('Failed to fetch precise timing from homatherapie.de');
+            throw new Error('All primary timing methods failed');
         }
         
     } catch (error) {
-        console.error('❌ homatherapie.de API blocked or failed:', error);
+        console.error('❌ Timing calculation/fetch failed:', error);
         await getSunriseSunsetFromSunAPI(lat, lng);
     }
 }
@@ -743,14 +922,6 @@ document.addEventListener('DOMContentLoaded', function() {
             if (elementTop < window.innerHeight - 50) {
                 element.classList.add('active');
             }
-        });
-    }
-
-    function scrollToMantras() {
-        const mantrasSection = document.getElementById('mantras-section');
-
-        mantrasSection.scrollIntoView({
-            behavior: 'smooth'
         });
     }
 
