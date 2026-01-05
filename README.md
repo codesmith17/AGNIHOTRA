@@ -1,15 +1,15 @@
-# EternalAgni - Agnihotra Timing App 🔥
+# EternalAgni - Agnihotra Timing App
 
 Precise sunrise and sunset timing for Agnihotra practice with location-based calculations.
 
-## 🌅 Features
+## Features
 
 - **Seconds-precision timing** for accurate Agnihotra practice
 - **Automatic location detection** (GPS or IP-based)
 - **Smart upcoming countdowns** based on current time
 - **Offline-ready** with fallback APIs
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Option 1: Basic Usage (sunrisesunset.io API)
 Simply open `index.html` in your browser. This provides seconds-precision timing suitable for Agnihotra.
@@ -17,7 +17,7 @@ Simply open `index.html` in your browser. This provides seconds-precision timing
 ### Option 2: Maximum Precision (homatherapie.de API)
 For the most precise timing used by Agnihotra practitioners worldwide:
 
-#### 🚀 Method A: Deployed Proxy (Best for sharing)
+#### Method A: Deployed Proxy (Best for sharing)
 Deploy your own CORS proxy so **anyone can use your app**:
 
 ```bash
@@ -31,7 +31,7 @@ Deploy your own CORS proxy so **anyone can use your app**:
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 
-#### 🔧 Method B: Local Proxy Server
+#### Method B: Local Proxy Server
 ```bash
 # Install dependencies
 npm install
@@ -42,12 +42,12 @@ npm start
 # Open http://localhost:8080 in your browser
 ```
 
-#### ⚡ Method C: Browser Extension
+#### Method C: Browser Extension
 1. Install "CORS Unblock" extension in Chrome
 2. Enable it when using the app
 3. Disable it for normal browsing
 
-#### 🛠️ Method D: Chrome with CORS Disabled
+#### Method D: Chrome with CORS Disabled
 ```bash
 # macOS
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --disable-web-security --user-data-dir="/tmp/chrome_dev" file://$(pwd)/index.html
@@ -59,7 +59,7 @@ chrome.exe --disable-web-security --user-data-dir="c:/temp/chrome_dev" file:///p
 google-chrome --disable-web-security --user-data-dir="/tmp/chrome_dev" file://$(pwd)/index.html
 ```
 
-## 🔧 How It Works
+## How It Works
 
 ### API Priority System
 1. **homatherapie.de** (via local proxy) - Maximum precision
@@ -74,14 +74,14 @@ google-chrome --disable-web-security --user-data-dir="/tmp/chrome_dev" file://$(
 - **Before sunrise**: Shows today's sunrise + sunset
 - **After sunrise**: Shows tomorrow's sunrise + sunset
 
-## 📱 Browser Compatibility
+## Browser Compatibility
 
-- ✅ **Chrome/Edge**: Full support
-- ✅ **Firefox**: Full support  
-- ✅ **Safari**: Full support
-- ✅ **Mobile browsers**: Works on all devices
+- **Chrome/Edge**: Full support
+- **Firefox**: Full support  
+- **Safari**: Full support
+- **Mobile browsers**: Works on all devices
 
-## 🛠️ Development
+## Development
 
 ### Local Development with Proxy
 ```bash
@@ -132,10 +132,11 @@ This app provides the precise timing needed for traditional Agnihotra fire cerem
 4. Test with both APIs
 5. Submit a pull request
 
-## 📄 License
+## License
 
 MIT License - Feel free to use for personal or educational purposes.
 
 ---
 
-**🕉️ May your Agnihotra practice bring peace and healing to the world** 🕉️ 
+**May your Agnihotra practice bring peace and healing to the world**
+ 

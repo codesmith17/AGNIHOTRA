@@ -5,7 +5,7 @@ const path = require('path');
 const publicDir = 'public';
 if (!fs.existsSync(publicDir)) {
     fs.mkdirSync(publicDir, { recursive: true });
-    console.log('✅ Created public directory');
+    console.log('Created public directory');
 }
 
 // Files to copy to public directory
@@ -29,7 +29,7 @@ const foldersToCopy = [
 filesToCopy.forEach(file => {
     if (fs.existsSync(file)) {
         fs.copyFileSync(file, path.join(publicDir, file));
-        console.log(`✅ Copied ${file} to public/`);
+        console.log(`Copied ${file} to public/`);
     } else {
         console.log(`⚠️  File not found: ${file}`);
     }
@@ -55,7 +55,7 @@ function copyDir(src, dest) {
 foldersToCopy.forEach(folder => {
     if (fs.existsSync(folder)) {
         copyDir(folder, path.join(publicDir, folder));
-        console.log(`✅ Copied folder ${folder} to public/`);
+        console.log(`Copied folder ${folder} to public/`);
     }
 });
 
