@@ -18,7 +18,7 @@ export default async function handler(req, res) {
     }
 
     try {
-        console.log('🌅 Proxying request to homatherapie.de...');
+        console.log('Proxying request to homatherapie.de...');
         
         // Forward the request to homatherapie.de
         const response = await fetch('https://www.homatherapie.de/en/Agnihotra_Zeitenprogramm/results.html', {
@@ -42,13 +42,13 @@ export default async function handler(req, res) {
         const htmlText = await response.text();
         
         // Log success
-        console.log('✅ Successfully fetched data from homatherapie.de');
+        console.log('Successfully fetched data from homatherapie.de');
         
         // Return the HTML content
         res.status(200).send(htmlText);
         
     } catch (error) {
-        console.error('❌ Error proxying request:', error);
+        console.error('Error proxying request:', error);
         res.status(500).json({ 
             error: 'Failed to fetch data from homatherapie.de',
             details: error.message 

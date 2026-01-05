@@ -35,7 +35,7 @@ app.use('/api/agnihotra', createProxyMiddleware({
 app.use(express.static('.'));
 
 app.listen(PORT, () => {
-    console.log(`🌅 Agnihotra CORS Proxy running on http://localhost:${PORT}`);
-    console.log(`📱 Open http://localhost:${PORT} in your browser`);
-    console.log(`🔧 Proxy endpoint: http://localhost:${PORT}/api/agnihotra`);
+    console.log(`Agnihotra CORS Proxy running on http://localhost:${PORT}`);
+    console.log(`Open http://localhost:${PORT} in your browser`);
+    console.log(`Proxy endpoint: http://localhost:${PORT}/api/agnihotra`);
 }); 
