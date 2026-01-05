@@ -17,7 +17,12 @@ const filesToCopy = [
     '68fdb35faa0209f017128af309265ac2_icon.png',
     'Sunrise Agnihotra Mantra.mp3',
     'Sunset Agnihotra Mantra.mp3',
-    '1110707675-preview.mp4'
+    '1110707675-preview.mp4',
+    'copper-pyramid.jpg',
+    'cow-dung.webp',
+    'cow-ghee.jpg',
+    'unpolished-rice.jpg',
+    'precise-timing.jpg'
 ];
 
 // Folders to copy to public directory

@@ -27,6 +27,7 @@ body {
   line-height: 1.6;
   background-color: var(--bg-warm);
   color: var(--text-dark);
+  overflow-x: hidden; /* Prevent horizontal scroll */
 }
 
 h1, h2, h3 {
@@ -229,6 +230,90 @@ nav {
   font-size: 0.95rem;
 }
 
+/* Materials Section */
+.materials-section {
+  padding: 80px 5%;
+  background-color: var(--bg-warm);
+  text-align: center;
+}
+
+.materials-section h2 {
+  font-size: 2.8rem;
+  color: var(--text-dark);
+  margin-bottom: 1rem;
+}
+
+.section-desc {
+  max-width: 700px;
+  margin: 0 auto 50px;
+  color: var(--text-light);
+  font-size: 1.1rem;
+}
+
+.materials-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 30px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.material-card {
+  background: var(--white);
+  padding: 40px 30px;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px var(--shadow);
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  border: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1 1 300px; /* Allow cards to grow and shrink, with a base of 300px */
+  max-width: 380px; /* Keep them from getting too wide on large screens */
+}
+
+.material-card:hover {
+  transform: translateY(-12px);
+  box-shadow: 0 20px 40px rgba(184, 115, 51, 0.15);
+  border-color: var(--copper);
+}
+
+.material-icon {
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(135deg, #fff9f0, #fff);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 25px;
+  color: var(--copper);
+  font-size: 2rem;
+  box-shadow: inset 0 2px 5px rgba(0,0,0,0.05);
+  border: 1px solid #fff2e0;
+  overflow: hidden; /* Ensure images stay inside the circle */
+}
+
+.material-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* Fill the circle beautifully */
+}
+
+.material-card h3 {
+  font-size: 1.4rem;
+  color: var(--text-dark);
+  margin-bottom: 15px;
+  font-family: 'Playfair Display', serif;
+}
+
+.material-card p {
+  color: var(--text-light);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
 /* Dashboard Content */
 .content-wrap {
   padding: 60px 5%;
@@ -260,19 +345,72 @@ nav {
 
 .timing-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: 1fr 1fr;
   gap: 30px;
+  max-width: 1200px;
+  margin: 0 auto;
 }
 
-.timing-grid .card {
-  margin-bottom: 0;
-  border-top: 5px solid var(--agni-orange);
-  padding: 30px 20px;
+.upcoming-times {
+  grid-column: 1 / -1; /* Center and take full width */
+  width: 800px; /* Constant width for desktop */
+  max-width: 95%; /* Responsive safety */
+  margin: 0 auto 30px auto;
+  border-top: 10px solid var(--agni-orange) !important;
+  box-shadow: 0 25px 50px rgba(255, 69, 0, 0.2);
+  background: linear-gradient(135deg, #ffffff, #fff9f0);
 }
 
-.upcoming-times { border-top-color: var(--agni-orange) !important; }
-.today-times { border-top-color: var(--sun-gold) !important; }
-.tomorrow-times { border-top-color: var(--copper) !important; }
+.upcoming-times .section-title {
+  font-size: 2.2rem;
+  margin-bottom: 25px;
+}
+
+.upcoming-times .times-list {
+  display: grid; 
+  grid-template-columns: repeat(2, 1fr); /* Equal columns, more flexible than fixed pixels */
+  justify-content: center;
+  gap: 20px;
+  width: 100%;
+  margin-top: 20px;
+}
+
+.upcoming-times .time-item {
+  width: 100%; /* Take full width of the grid cell */
+  padding: 20px 10px;
+  border-width: 1px;
+  height: 170px; /* Constant height, balanced for content */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.upcoming-times .countdown-value {
+  font-size: 2.4rem;
+  white-space: nowrap;
+  letter-spacing: -1px;
+  color: var(--copper); /* Ensure consistent color for upcoming countdown */
+}
+
+.upcoming-times .time-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.5px;
+  color: var(--text-light);
+  margin-bottom: 8px;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.today-times, .tomorrow-times {
+  opacity: 0.85;
+  transition: opacity 0.3s;
+}
+
+.today-times:hover, .tomorrow-times:hover {
+  opacity: 1;
+}
 
 .section-title {
   margin-top: 10px;
@@ -347,11 +485,6 @@ nav {
   color: var(--text-light);
   margin-top: 8px;
   font-weight: 500;
-}
-
-.upcoming-times .countdown-value {
-  font-size: 2.2rem;
-  color: var(--copper);
 }
 
 /* Mantras Section */
@@ -460,9 +593,22 @@ footer {
   }
 
   .nav-icon {
+    display: flex !important;
+    position: relative;
+    cursor: pointer;
+    padding: 5px;
+    z-index: 1100;
+  }
+
+  .nav-icon label {
     display: block;
     cursor: pointer;
-    padding: 10px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
   }
 
   .nav-icon span {
@@ -470,7 +616,7 @@ footer {
     width: 25px;
     height: 3px;
     background-color: var(--copper);
-    margin: 5px 0;
+    margin: 3px 0;
     transition: 0.3s;
   }
 
@@ -480,13 +626,16 @@ footer {
     left: 0;
     width: 100%;
     background-color: var(--white);
+    display: flex;
     flex-direction: column;
     align-items: center;
     padding: 20px 0;
     box-shadow: 0 5px 10px var(--shadow);
-    transform: translateY(-150%);
-    transition: transform 0.3s ease-in-out;
+    transform: translateY(-200%);
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 999;
+    list-style: none;
+    visibility: hidden;
   }
 
   .nav-links li {
@@ -500,40 +649,95 @@ footer {
 
   #nav-check:checked ~ .nav-links {
     transform: translateY(0);
+    visibility: visible;
   }
 
   .hero-content {
     padding: 0 15px;
-    margin-top: -40px; /* Slight offset to account for nav and center better visually */
+    margin-top: -40px;
   }
 
   .hero-content h1 { 
-    font-size: 2.5rem !important; 
+    font-size: 2.2rem !important; 
     line-height: 1.2;
   }
   
   .hero-title {
-    font-size: 2.8rem !important;
+    font-size: 2.5rem !important;
     letter-spacing: 1px;
     text-shadow: 0 0 15px rgba(255, 69, 0, 0.8), 2px 2px 4px rgba(0,0,0,0.8);
   }
 
   .hero-content p {
-    font-size: 1rem;
+    font-size: 0.95rem;
     padding: 0 10px;
   }
 
-  .nav-links { display: none; }
-  
   .timing-grid { 
     grid-template-columns: 1fr;
     gap: 20px;
+  }
+
+  .upcoming-times {
+    width: 95% !important;
+    padding: 20px 8px;
+    order: -1;
+    border-top-width: 10px !important;
+    max-width: none;
+    margin: 0 auto 20px auto;
+  }
+
+  .upcoming-times .times-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 0;
+  }
+
+  .upcoming-times .time-item {
+    padding: 12px 4px;
+    height: 145px;
+    width: 100%;
+  }
+
+  .upcoming-times .section-title {
+    font-size: 1.6rem;
+    margin-bottom: 15px;
+  }
+
+  .upcoming-times .countdown-value {
+    font-size: 1.35rem !important;
+    letter-spacing: -0.5px;
+  }
+
+  .upcoming-times .time-label {
+    font-size: 0.52rem;
+    gap: 2px;
+    margin-bottom: 5px;
+  }
+
+  .upcoming-times .time-secondary {
+    font-size: 0.65rem;
+    margin-top: 5px;
   }
   
   #title { font-size: 1.2rem; }
 
   .about-section h2 {
     font-size: 2rem;
+  }
+
+  .materials-section h2 {
+    font-size: 2.2rem;
+  }
+
+  .section-desc {
+    font-size: 1rem;
+    margin-bottom: 30px;
+  }
+
+  .material-card {
+    padding: 30px 20px;
   }
 
   .mantras-container h2 {
@@ -544,11 +748,7 @@ footer {
     font-size: 0.8rem;
   }
 
-  .time-value, .countdown-value {
+  .time-value {
     font-size: 1.4rem;
-  }
-
-  .upcoming-times .countdown-value {
-    font-size: 1.8rem;
   }
 }

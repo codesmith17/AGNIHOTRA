@@ -1,3 +1,50 @@
+// --- Astronomical Constants (Meeus/NOAA SPA) ---
+const ASTRONOMICAL_CONSTANTS = {
+  JULIAN_DAY_AT_UNIX_EPOCH: 2440587.5,
+  JULIAN_DAY_AT_J2000: 2451545.0,
+  DAYS_PER_JULIAN_CENTURY: 36525,
+  MILLISECONDS_PER_DAY: 86400000,
+  MILLISECONDS_PER_HOUR: 3600000,
+
+  // Geometric Mean Longitude Constants
+  SUN_MEAN_LONGITUDE_J2000: 280.46646,
+  SUN_MEAN_LONGITUDE_COEFF_1: 36000.76983,
+  SUN_MEAN_LONGITUDE_COEFF_2: 0.0003032,
+
+  // Mean Anomaly Constants
+  SUN_MEAN_ANOMALY_J2000: 357.52911,
+  SUN_MEAN_ANOMALY_COEFF_1: 35999.05029,
+  SUN_MEAN_ANOMALY_COEFF_2: 0.0001537,
+
+  // Orbit Eccentricity Constants
+  EARTH_ORBIT_ECCENTRICITY_J2000: 0.016708634,
+  EARTH_ORBIT_ECCENTRICITY_COEFF_1: 0.000042037,
+  EARTH_ORBIT_ECCENTRICITY_COEFF_2: 0.0000001267,
+
+  // Equation of Center Constants
+  SUN_EQ_CENTER_COEFF_1: 1.914602,
+  SUN_EQ_CENTER_COEFF_2: 0.004817,
+  SUN_EQ_CENTER_COEFF_3: 0.000014,
+  SUN_EQ_CENTER_COEFF_4: 0.019993,
+  SUN_EQ_CENTER_COEFF_5: 0.000101,
+  SUN_EQ_CENTER_COEFF_6: 0.000289,
+
+  // Moon/Nutation Constants
+  MOON_ASCENDING_NODE_J2000: 125.04,
+  MOON_ASCENDING_NODE_COEFF_1: 1934.136,
+  SUN_APPARENT_LONGITUDE_CONST_1: 0.00569,
+  SUN_APPARENT_LONGITUDE_CONST_2: 0.00478,
+
+  // Obliquity Constants
+  MEAN_OBLIQUITY_J2000_BASE: 23,
+  MEAN_OBLIQUITY_J2000_MIN: 26,
+  MEAN_OBLIQUITY_COEFF_1: 21.448,
+  MEAN_OBLIQUITY_COEFF_2: 46.815,
+  MEAN_OBLIQUITY_COEFF_3: 0.00059,
+  MEAN_OBLIQUITY_COEFF_4: 0.001813,
+  NUTATION_OBLIQUITY_COEFF: 0.00256,
+};
+
 // --- Astronomical Calculation (Homatherapy Germany Style) ---
 /**
  * IMPORTANT NOTE ON AGNIHOTRA TIMINGS:
@@ -27,32 +74,45 @@ function calculateAgnihotraTiming(dateUTC, lat, lon, tzHours) {
      * 1. TIME & EPOCH
      * julianDay: A continuous count of days since 4713 BCE. Standardizes time across eras. (Meeus Ch. 7)
      */
-    const julianDay = timestampUTC / 86400000 + 2440587.5;
+    const julianDay =
+      timestampUTC / ASTRONOMICAL_CONSTANTS.MILLISECONDS_PER_DAY +
+      ASTRONOMICAL_CONSTANTS.JULIAN_DAY_AT_UNIX_EPOCH;
     /**
      * julianCentury: Number of 100-year blocks since Jan 1, 2000. Tracks secular orbital drift. (Meeus Eq. 25.1)
      */
-    const julianCentury = (julianDay - 2451545.0) / 36525;
+    const julianCentury =
+      (julianDay - ASTRONOMICAL_CONSTANTS.JULIAN_DAY_AT_J2000) /
+      ASTRONOMICAL_CONSTANTS.DAYS_PER_JULIAN_CENTURY;
 
     /**
      * 2. ORBITAL POSITION
      * sunGeometricMeanLongitude: The Sun's "average" position if Earth's orbit were a circle. (Meeus Eq. 25.2)
      */
     let sunGeometricMeanLongitude =
-      280.46646 + julianCentury * (36000.76983 + 0.0003032 * julianCentury);
+      ASTRONOMICAL_CONSTANTS.SUN_MEAN_LONGITUDE_J2000 +
+      julianCentury *
+        (ASTRONOMICAL_CONSTANTS.SUN_MEAN_LONGITUDE_COEFF_1 +
+          ASTRONOMICAL_CONSTANTS.SUN_MEAN_LONGITUDE_COEFF_2 * julianCentury);
     sunGeometricMeanLongitude = ((sunGeometricMeanLongitude % 360) + 360) % 360;
 
     /**
      * sunMeanAnomaly: Earth's "starting point" in its loop relative to Perihelion (closest point to Sun). (Meeus Eq. 25.3)
      */
     const sunMeanAnomaly =
-      357.52911 + julianCentury * (35999.05029 - 0.0001537 * julianCentury);
+      ASTRONOMICAL_CONSTANTS.SUN_MEAN_ANOMALY_J2000 +
+      julianCentury *
+        (ASTRONOMICAL_CONSTANTS.SUN_MEAN_ANOMALY_COEFF_1 -
+          ASTRONOMICAL_CONSTANTS.SUN_MEAN_ANOMALY_COEFF_2 * julianCentury);
 
     /**
      * earthOrbitEccentricity: Measures how "oval" Earth's orbit is (changes slightly every century). (Meeus Eq. 25.4)
      */
     const earthOrbitEccentricity =
-      0.016708634 -
-      julianCentury * (0.000042037 + 0.0000001267 * julianCentury);
+      ASTRONOMICAL_CONSTANTS.EARTH_ORBIT_ECCENTRICITY_J2000 -
+      julianCentury *
+        (ASTRONOMICAL_CONSTANTS.EARTH_ORBIT_ECCENTRICITY_COEFF_1 +
+          ASTRONOMICAL_CONSTANTS.EARTH_ORBIT_ECCENTRICITY_COEFF_2 *
+            julianCentury);
 
     /**
      * 3. CORRECTIONS & ACCURACY
@@ -60,10 +120,15 @@ function calculateAgnihotraTiming(dateUTC, lat, lon, tzHours) {
      */
     const sunEquationOfCenter =
       Math.sin(degreesToRadians * sunMeanAnomaly) *
-        (1.914602 - julianCentury * (0.004817 + 0.000014 * julianCentury)) +
+        (ASTRONOMICAL_CONSTANTS.SUN_EQ_CENTER_COEFF_1 -
+          julianCentury *
+            (ASTRONOMICAL_CONSTANTS.SUN_EQ_CENTER_COEFF_2 +
+              ASTRONOMICAL_CONSTANTS.SUN_EQ_CENTER_COEFF_3 * julianCentury)) +
       Math.sin(degreesToRadians * 2 * sunMeanAnomaly) *
-        (0.019993 - 0.000101 * julianCentury) +
-      Math.sin(degreesToRadians * 3 * sunMeanAnomaly) * 0.000289;
+        (ASTRONOMICAL_CONSTANTS.SUN_EQ_CENTER_COEFF_4 -
+          ASTRONOMICAL_CONSTANTS.SUN_EQ_CENTER_COEFF_5 * julianCentury) +
+      Math.sin(degreesToRadians * 3 * sunMeanAnomaly) *
+        ASTRONOMICAL_CONSTANTS.SUN_EQ_CENTER_COEFF_6;
 
     /**
      * sunTrueLongitude: The exact physical position of the Sun after orbital speed correction.
@@ -73,26 +138,32 @@ function calculateAgnihotraTiming(dateUTC, lat, lon, tzHours) {
     /**
      * moonAscendingNodeLongitude: Tracks Moon's position to calculate Nutation (Earth's axis wobble).
      */
-    const moonAscendingNodeLongitude = 125.04 - 1934.136 * julianCentury;
+    const moonAscendingNodeLongitude =
+      ASTRONOMICAL_CONSTANTS.MOON_ASCENDING_NODE_J2000 -
+      ASTRONOMICAL_CONSTANTS.MOON_ASCENDING_NODE_COEFF_1 * julianCentury;
 
     /**
      * sunApparentLongitude: Sun's apparent position from Earth, correcting for wobble and light time.
      */
     const sunApparentLongitude =
       sunTrueLongitude -
-      0.00569 -
-      0.00478 * Math.sin(degreesToRadians * moonAscendingNodeLongitude);
+      ASTRONOMICAL_CONSTANTS.SUN_APPARENT_LONGITUDE_CONST_1 -
+      ASTRONOMICAL_CONSTANTS.SUN_APPARENT_LONGITUDE_CONST_2 *
+        Math.sin(degreesToRadians * moonAscendingNodeLongitude);
 
     /**
      * 4. EARTH'S TILT (SEASONS)
      * meanObliquityOfEcliptic: Average tilt of Earth's axis (~23.44°). (Meeus Eq. 22.2)
      */
     const meanObliquityOfEcliptic =
-      23 +
-      (26 +
-        (21.448 -
+      ASTRONOMICAL_CONSTANTS.MEAN_OBLIQUITY_J2000_BASE +
+      (ASTRONOMICAL_CONSTANTS.MEAN_OBLIQUITY_J2000_MIN +
+        (ASTRONOMICAL_CONSTANTS.MEAN_OBLIQUITY_COEFF_1 -
           julianCentury *
-            (46.815 + julianCentury * (0.00059 - julianCentury * 0.001813))) /
+            (ASTRONOMICAL_CONSTANTS.MEAN_OBLIQUITY_COEFF_2 +
+              julianCentury *
+                (ASTRONOMICAL_CONSTANTS.MEAN_OBLIQUITY_COEFF_3 -
+                  julianCentury * ASTRONOMICAL_CONSTANTS.MEAN_OBLIQUITY_COEFF_4))) /
           60) /
         60;
 
@@ -101,7 +172,8 @@ function calculateAgnihotraTiming(dateUTC, lat, lon, tzHours) {
      */
     const correctedObliquityOfEcliptic =
       meanObliquityOfEcliptic +
-      0.00256 * Math.cos(degreesToRadians * moonAscendingNodeLongitude);
+      ASTRONOMICAL_CONSTANTS.NUTATION_OBLIQUITY_COEFF *
+        Math.cos(degreesToRadians * moonAscendingNodeLongitude);
 
     /**
      * sunApparentDeclination: The "height" of the Sun relative to the Equator. Determines day length.
@@ -124,9 +196,7 @@ function calculateAgnihotraTiming(dateUTC, lat, lon, tzHours) {
       radiansToDegrees *
       (tangentSquaredObliquity *
         Math.sin(2 * degreesToRadians * sunGeometricMeanLongitude) -
-        2 *
-          earthOrbitEccentricity *
-          Math.sin(degreesToRadians * sunMeanAnomaly) +
+        2 * earthOrbitEccentricity * Math.sin(degreesToRadians * sunMeanAnomaly) +
         4 *
           earthOrbitEccentricity *
           tangentSquaredObliquity *
@@ -169,7 +239,8 @@ function calculateAgnihotraTiming(dateUTC, lat, lon, tzHours) {
   // Pass 2: Refine Sunrise
   const approximateSunriseUTC =
     dateUTC.getTime() +
-    (solarNoonAtNoonDetails - hourAngle / 15 - tzHours) * 3600000;
+    (solarNoonAtNoonDetails - hourAngle / 15 - tzHours) *
+      ASTRONOMICAL_CONSTANTS.MILLISECONDS_PER_HOUR;
   const sunriseDetails = getSunDetails(approximateSunriseUTC);
   const refinedHourAngleSunrise =
     Math.acos(
@@ -186,7 +257,8 @@ function calculateAgnihotraTiming(dateUTC, lat, lon, tzHours) {
   // Pass 2: Refine Sunset
   const approximateSunsetUTC =
     dateUTC.getTime() +
-    (solarNoonAtNoonDetails + hourAngle / 15 - tzHours) * 3600000;
+    (solarNoonAtNoonDetails + hourAngle / 15 - tzHours) *
+      ASTRONOMICAL_CONSTANTS.MILLISECONDS_PER_HOUR;
   const sunsetDetails = getSunDetails(approximateSunsetUTC);
   const refinedHourAngleSunset =
     Math.acos(
@@ -622,14 +694,24 @@ function displayFullSchedule(timings) {
   // Clear existing rows
   tableBody.innerHTML = "";
 
-  // Sort dates
-  const sortedDates = Object.keys(timings).sort((a, b) => {
-    const [dayA, monthA, yearA] = a.split(".").map(Number);
-    const [dayB, monthB, yearB] = b.split(".").map(Number);
-    return (
-      new Date(yearA, monthA - 1, dayA) - new Date(yearB, monthB - 1, dayB)
-    );
-  });
+  // Get today's date at midnight for comparison
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Filter out past dates and sort remaining dates chronologically
+  const sortedDates = Object.keys(timings)
+    .filter((dateStr) => {
+      const [day, month, year] = dateStr.split(".").map(Number);
+      const rowDate = new Date(year, month - 1, day);
+      return rowDate >= today;
+    })
+    .sort((a, b) => {
+      const [dayA, monthA, yearA] = a.split(".").map(Number);
+      const [dayB, monthB, yearB] = b.split(".").map(Number);
+      return (
+        new Date(yearA, monthA - 1, dayA) - new Date(yearB, monthB - 1, dayB)
+      );
+    });
 
   // Add rows for each date
   sortedDates.forEach((dateStr) => {
