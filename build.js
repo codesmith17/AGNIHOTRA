@@ -15,6 +15,7 @@ const filesToCopy = [
     'style.css',
     'style.css.map',
     '68fdb35faa0209f017128af309265ac2_icon.png',
+    'agnihotra-icon.png',
     'Sunrise Agnihotra Mantra.mp3',
     'Sunset Agnihotra Mantra.mp3',
     '1110707675-preview.mp4',
@@ -29,7 +30,7 @@ const filesToCopy = [
 
 // Folders to copy to public directory
 const foldersToCopy = [
-    'favicons'
+    'api'
 ];
 
 // Copy each file
