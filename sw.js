@@ -1,4 +1,4 @@
-const CACHE_NAME = 'agnihotra-cache-v1';
+const CACHE_NAME = 'agnihotra-cache-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -14,12 +14,20 @@ const ASSETS_TO_CACHE = [
   '/unpolished-rice.jpg',
   '/agnihotra-timing.jpg',
   '/1110707675-preview.mp4',
-  '/favicons/web/icons8-fire-3d-fluency-32.png',
   '/favicons/web/icons8-fire-3d-fluency-16.png',
-  '/favicons/web/icons8-fire-3d-fluency-96.png',
+  '/favicons/web/icons8-fire-3d-fluency-32.png',
+  '/favicons/web/icons8-fire-3d-fluency-57.png',
+  '/favicons/web/icons8-fire-3d-fluency-60.png',
+  '/favicons/web/icons8-fire-3d-fluency-70.png',
+  '/favicons/web/icons8-fire-3d-fluency-72.png',
   '/favicons/web/icons8-fire-3d-fluency-76.png',
+  '/favicons/web/icons8-fire-3d-fluency-96.png',
   'https://icono-49d6.kxcdn.com/icono.min.css',
   'https://use.fontawesome.com/releases/v5.8.1/css/all.css',
+  'https://use.fontawesome.com/releases/v5.8.1/webfonts/fa-solid-900.woff2',
+  'https://use.fontawesome.com/releases/v5.8.1/webfonts/fa-solid-900.woff',
+  'https://use.fontawesome.com/releases/v5.8.1/webfonts/fa-regular-400.woff2',
+  'https://use.fontawesome.com/releases/v5.8.1/webfonts/fa-regular-400.woff',
   'https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&family=Playfair+Display:wght@700&display=swap'
 ];
 
@@ -80,7 +88,19 @@ self.addEventListener('fetch', (event) => {
         return fetch(event.request).then(
           (response) => {
             // Check if we received a valid response
-            if (!response || response.status !== 200 || response.type !== 'basic') {
+            if (!response || response.status !== 200) {
+              return response;
+            }
+
+            // Only cache certain types of responses
+            const shouldCache = 
+              response.type === 'basic' || // Same-origin
+              response.type === 'cors' ||   // CORS-enabled resources (fonts, CDN resources)
+              event.request.url.includes('fonts.gstatic.com') ||
+              event.request.url.includes('fonts.googleapis.com') ||
+              event.request.url.includes('use.fontawesome.com');
+
+            if (!shouldCache) {
               return response;
             }
 
@@ -88,10 +108,11 @@ self.addEventListener('fetch', (event) => {
 
             caches.open(CACHE_NAME)
               .then((cache) => {
-                // Don't cache API calls or external domains unless specifically needed
+                // Don't cache API calls, but DO cache fonts and CDN resources
                 const url = event.request.url;
                 if (!url.includes('api.bigdatacloud.net') && 
-                    !url.includes('nominatim.openstreetmap.org')) {
+                    !url.includes('nominatim.openstreetmap.org') &&
+                    !url.includes('homatherapie.de')) {
                   cache.put(event.request, responseToCache);
                 }
               });
