@@ -1102,6 +1102,16 @@ async function getLocation() {
 
 async function reverseGeocode(latitude, longitude) {
   try {
+    // If offline, skip API calls and use cached data
+    if (!navigator.onLine) {
+      document.getElementById("userLocation").innerHTML = `
+        <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Offline Mode:</span>
+        <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">Location: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}</span>
+      `;
+      await getSunriseSunset(latitude, longitude);
+      return;
+    }
+
     // Use Nominatim (OpenStreetMap) for more precise address details
     const response = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`,
@@ -1165,6 +1175,15 @@ async function reverseGeocode(latitude, longitude) {
 
 async function reverseGeocodeApproximate(latitude, longitude) {
   try {
+    // If offline, skip API call
+    if (!navigator.onLine) {
+      document.getElementById(
+        "userLocation"
+      ).innerText = `Offline Mode: ${latitude.toFixed(2)}, ${longitude.toFixed(2)} (approximate)`;
+      await getSunriseSunset(latitude, longitude);
+      return;
+    }
+
     // Use the same reverse geocoding service but mark as approximate
     const response = await fetch(
       `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
@@ -1210,6 +1229,20 @@ async function reverseGeocodeApproximate(latitude, longitude) {
 
 async function getApproximateLocation() {
   try {
+    // If offline, show message and use default location or cached data
+    if (!navigator.onLine) {
+      document.getElementById(
+        "userLocation"
+      ).innerText = `Offline Mode - Unable to detect location automatically. Showing cached timings if available.`;
+      
+      // Hide loading spinner
+      const loadingSpinner = document.querySelector(".loading-spinner");
+      if (loadingSpinner) {
+        loadingSpinner.style.display = "none";
+      }
+      return;
+    }
+
     // Try multiple IP geolocation services to get coordinates only
     const services = [
       "https://ipapi.co/json/",
