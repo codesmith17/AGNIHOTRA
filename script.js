@@ -1370,7 +1370,212 @@ if ('serviceWorker' in navigator) {
 window.addEventListener('online', updateOnlineStatus);
 window.addEventListener('offline', updateOnlineStatus);
 
+// Format time in MM:SS
+function formatTime(seconds) {
+  if (isNaN(seconds)) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+// Initialize audio player
+function initAudioPlayer(audioId) {
+  const audio = document.getElementById(audioId);
+  const progressBar = document.getElementById(audioId.replace('-audio', '-progress-bar'));
+  const progressFill = document.getElementById(audioId.replace('-audio', '-progress'));
+  const currentTimeDisplay = document.getElementById(audioId.replace('-audio', '-current'));
+  const durationDisplay = document.getElementById(audioId.replace('-audio', '-duration'));
+  
+  if (!audio) return;
+  
+  // Force preload metadata
+  audio.preload = 'metadata';
+  audio.load();
+  
+  // Function to update duration display
+  const updateDuration = () => {
+    if (durationDisplay && audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
+      durationDisplay.textContent = formatTime(audio.duration);
+    }
+  };
+  
+  // Update progress and time
+  audio.addEventListener('timeupdate', () => {
+    if (!isNaN(audio.duration) && isFinite(audio.duration)) {
+      const progress = (audio.currentTime / audio.duration) * 100;
+      if (progressFill) {
+        progressFill.style.width = Math.min(100, progress) + '%';
+      }
+      if (currentTimeDisplay) {
+        currentTimeDisplay.textContent = formatTime(audio.currentTime);
+      }
+      // Update duration if not set yet
+      updateDuration();
+    }
+  });
+  
+  // Load metadata
+  audio.addEventListener('loadedmetadata', () => {
+    updateDuration();
+    if (currentTimeDisplay) {
+      currentTimeDisplay.textContent = '0:00';
+    }
+  });
+  
+  // When audio is ready to play
+  audio.addEventListener('canplay', updateDuration);
+  
+  // Also try on loadeddata
+  audio.addEventListener('loadeddata', updateDuration);
+  
+  // Try immediately if already loaded
+  if (audio.readyState >= 1) {
+    updateDuration();
+  }
+  
+  // Reset on end
+  audio.addEventListener('ended', () => {
+    const button = document.querySelector(`button[onclick*="${audioId}"]`);
+    if (button) {
+      const icon = button.querySelector('i');
+      icon.classList.replace('fa-pause', 'fa-play');
+      button.classList.remove('playing');
+    }
+    if (progressFill) {
+      progressFill.style.width = '0%';
+    }
+    if (currentTimeDisplay) {
+      currentTimeDisplay.textContent = '0:00';
+    }
+  });
+  
+  // Seek functionality - click
+  if (progressBar) {
+    let isDragging = false;
+    let animationFrameId = null;
+    
+    const handleSeek = (event) => {
+      const rect = progressBar.getBoundingClientRect();
+      const clickX = event.clientX - rect.left;
+      const percentage = Math.max(0, Math.min(1, clickX / rect.width));
+      
+      if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
+        // Update progress fill immediately for visual feedback during drag
+        if (isDragging && progressFill) {
+          progressFill.style.width = (percentage * 100) + '%';
+        }
+        
+        // Update audio current time
+        audio.currentTime = percentage * audio.duration;
+      }
+    };
+    
+    progressBar.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      handleSeek(event);
+    });
+    
+    // Seek functionality - drag with RAF for smoothness
+    const startDrag = (e) => {
+      e.preventDefault();
+      isDragging = true;
+      progressBar.classList.add('dragging');
+      handleSeek(e);
+    };
+    
+    const moveDrag = (e) => {
+      if (isDragging) {
+        // Cancel previous animation frame if any
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+        }
+        
+        // Use requestAnimationFrame for smooth updates
+        animationFrameId = requestAnimationFrame(() => {
+          handleSeek(e);
+        });
+      }
+    };
+    
+    const endDrag = () => {
+      if (isDragging) {
+        isDragging = false;
+        progressBar.classList.remove('dragging');
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+          animationFrameId = null;
+        }
+      }
+    };
+    
+    progressBar.addEventListener('mousedown', startDrag);
+    document.addEventListener('mousemove', moveDrag);
+    document.addEventListener('mouseup', endDrag);
+    
+    // Touch support for mobile
+    progressBar.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      isDragging = true;
+      progressBar.classList.add('dragging');
+      const touch = e.touches[0];
+      handleSeek(touch);
+    });
+    
+    document.addEventListener('touchmove', (e) => {
+      if (isDragging) {
+        e.preventDefault();
+        
+        // Cancel previous animation frame if any
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+        }
+        
+        // Use requestAnimationFrame for smooth updates
+        const touch = e.touches[0];
+        animationFrameId = requestAnimationFrame(() => {
+          handleSeek(touch);
+        });
+      }
+    }, { passive: false });
+    
+    document.addEventListener('touchend', endDrag);
+  }
+}
+
+// Custom Audio Player Controls
+function toggleAudio(audioId, button) {
+  const audio = document.getElementById(audioId);
+  const icon = button.querySelector('i');
+  
+  if (audio.paused) {
+    // Pause any other playing audio
+    document.querySelectorAll('.mantra-audio').forEach(a => {
+      if (a.id !== audioId && !a.paused) {
+        a.pause();
+        const otherBtn = document.querySelector(`button[onclick*="${a.id}"]`);
+        if (otherBtn) {
+          otherBtn.querySelector('i').classList.replace('fa-pause', 'fa-play');
+          otherBtn.classList.remove('playing');
+        }
+      }
+    });
+    
+    audio.play();
+    icon.classList.replace('fa-play', 'fa-pause');
+    button.classList.add('playing');
+  } else {
+    audio.pause();
+    icon.classList.replace('fa-pause', 'fa-play');
+    button.classList.remove('playing');
+  }
+}
+
 document.addEventListener("DOMContentLoaded", function () {
+  // Initialize audio players
+  initAudioPlayer('sunrise-audio');
+  initAudioPlayer('sunset-audio');
+  
   const fadeElements = document.querySelectorAll(".fade-in");
 
   function checkScroll() {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'agnihotra-cache-v2';
+const CACHE_NAME = 'agnihotra-cache-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -28,7 +28,7 @@ const ASSETS_TO_CACHE = [
   'https://use.fontawesome.com/releases/v5.8.1/webfonts/fa-solid-900.woff',
   'https://use.fontawesome.com/releases/v5.8.1/webfonts/fa-regular-400.woff2',
   'https://use.fontawesome.com/releases/v5.8.1/webfonts/fa-regular-400.woff',
-  'https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&family=Playfair+Display:wght@700&display=swap'
+  'https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&family=Playfair+Display:wght@700&family=Noto+Sans+Devanagari:wght@400;500;600&display=swap'
 ];
 
 // Install event - cache assets

@@ -12,7 +12,7 @@
     <link rel="shortcut icon" href="favicons/web/icons8-fire-3d-fluency-32.png">
     <link rel="stylesheet" href="https://icono-49d6.kxcdn.com/icono.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.8.1/css/all.css">
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&family=Playfair+Display:wght@700&family=Noto+Sans+Devanagari:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -152,21 +152,105 @@
 
         <div class="mantras-section fade-in">
             <div class="mantra-card">
-                <i class="fas fa-sun fa-2x" style="color: #FFD700; margin-bottom: 15px;"></i>
-                <h3>Sunrise Mantra</h3>
-                <audio class="mantra-audio" controls>
-                    <source src="Sunrise Agnihotra Mantra.mp3" type="audio/mp3">
-                    Your browser does not support the audio element.
-                </audio>
+                <div class="mantra-header">
+                    <i class="fas fa-sun fa-3x" style="color: #FFD700;"></i>
+                    <h3>Sunrise Mantra</h3>
+                </div>
+                
+                <div class="audio-player-wrapper">
+                    <audio id="sunrise-audio" class="mantra-audio" preload="metadata">
+                        <source src="Sunrise Agnihotra Mantra.mp3" type="audio/mp3">
+                        Your browser does not support the audio element.
+                    </audio>
+                    <div class="custom-audio-controls">
+                        <button class="play-btn" onclick="toggleAudio('sunrise-audio', this)">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <div class="audio-info">
+                            <div class="audio-header">
+                                <span class="audio-title">Sūrya Mantra</span>
+                                <div class="audio-times">
+                                    <span id="sunrise-current">0:00</span>
+                                    <span class="time-separator">/</span>
+                                    <span id="sunrise-duration">0:00</span>
+                                </div>
+                            </div>
+                            <div class="progress-container">
+                                <div class="progress-bar" id="sunrise-progress-bar">
+                                    <div class="progress-fill" id="sunrise-progress">
+                                        <div class="progress-handle"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mantra-text">
+                    <div class="sanskrit">
+                        <p>सूर्याय स्वाहा । सूर्याय इदं न मम ।</p>
+                        <p>प्रजापतये स्वाहा । प्रजापतये इदं न मम ॥</p>
+                    </div>
+                    <div class="transliteration">
+                        <p>Sūryāya Svāhā | Sūryāya Idaṃ Na Mama |</p>
+                        <p>Prajāpataye Svāhā | Prajāpataye Idaṃ Na Mama ||</p>
+                    </div>
+                    <div class="translation">
+                        <p><em>"To the Sun, salutations. This is not mine, but Yours.</em></p>
+                        <p><em>To Prajapati (Lord of Creation), salutations. This is not mine, but Yours."</em></p>
+                    </div>
+                </div>
             </div>
 
             <div class="mantra-card">
-                <i class="fas fa-moon fa-2x" style="color: #4B0082; margin-bottom: 15px;"></i>
-                <h3>Sunset Mantra</h3>
-                <audio class="mantra-audio" controls>
-                    <source src="Sunset Agnihotra Mantra.mp3" type="audio/mp3">
-                    Your browser does not support the audio element.
-                </audio>
+                <div class="mantra-header">
+                    <i class="fas fa-moon fa-3x" style="color: #4B0082;"></i>
+                    <h3>Sunset Mantra</h3>
+                </div>
+                
+                <div class="audio-player-wrapper">
+                    <audio id="sunset-audio" class="mantra-audio" preload="metadata">
+                        <source src="Sunset Agnihotra Mantra.mp3" type="audio/mp3">
+                        Your browser does not support the audio element.
+                    </audio>
+                    <div class="custom-audio-controls">
+                        <button class="play-btn" onclick="toggleAudio('sunset-audio', this)">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <div class="audio-info">
+                            <div class="audio-header">
+                                <span class="audio-title">Agni Mantra</span>
+                                <div class="audio-times">
+                                    <span id="sunset-current">0:00</span>
+                                    <span class="time-separator">/</span>
+                                    <span id="sunset-duration">0:00</span>
+                                </div>
+                            </div>
+                            <div class="progress-container">
+                                <div class="progress-bar" id="sunset-progress-bar">
+                                    <div class="progress-fill" id="sunset-progress">
+                                        <div class="progress-handle"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mantra-text">
+                    <div class="sanskrit">
+                        <p>अग्नये स्वाहा । अग्नये इदं न मम ।</p>
+                        <p>प्रजापतये स्वाहा । प्रजापतये इदं न मम ॥</p>
+                    </div>
+                    <div class="transliteration">
+                        <p>Agnaye Svāhā | Agnaye Idaṃ Na Mama |</p>
+                        <p>Prajāpataye Svāhā | Prajāpataye Idaṃ Na Mama ||</p>
+                    </div>
+                    <div class="translation">
+                        <p><em>"To Fire (Agni), salutations. This is not mine, but Yours.</em></p>
+                        <p><em>To Prajapati (Lord of Creation), salutations. This is not mine, but Yours."</em></p>
+                    </div>
+                </div>
             </div>
         </div>
     </section>
