@@ -1296,7 +1296,34 @@ async function showError(error) {
   await getApproximateLocation();
 }
 
-window.onload = getLocation;
+      // Offline status monitoring
+  function updateOnlineStatus() {
+    const indicator = document.getElementById('offline-indicator');
+    if (indicator) {
+      if (navigator.onLine) {
+        indicator.style.display = 'none';
+        document.body.classList.remove('is-offline');
+      } else {
+        indicator.style.display = 'block';
+        document.body.classList.add('is-offline');
+      }
+    }
+  }
+
+window.onload = () => {
+  getLocation();
+  updateOnlineStatus();
+};
+
+// Register Service Worker immediately for offline support
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js')
+    .then(reg => console.log('Service Worker registered', reg))
+    .catch(err => console.error('Service Worker registration failed', err));
+}
+
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
 
 document.addEventListener("DOMContentLoaded", function () {
   const fadeElements = document.querySelectorAll(".fade-in");

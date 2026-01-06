@@ -23,7 +23,8 @@ const filesToCopy = [
     'cow-ghee.jpg',
     'unpolished-rice.jpg',
     'agnihotra-timing.jpg',
-    'bell-tone.mp3'
+    'bell-tone.mp3',
+    'sw.js'
 ];
 
 // Folders to copy to public directory
