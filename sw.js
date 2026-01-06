@@ -1,9 +1,14 @@
-const CACHE_NAME = 'agnihotra-cache-v3';
-const ASSETS_TO_CACHE = [
-  '/',
+const CACHE_NAME = 'agnihotra-cache-v4';
+
+// Critical assets to cache on install
+const CRITICAL_ASSETS = [
   '/index.html',
   '/script.js',
-  '/style.css',
+  '/style.css'
+];
+
+// Assets to cache on-demand (as they're fetched)
+const CACHEABLE_RESOURCES = [
   '/bell-tone.mp3',
   '/Sunrise Agnihotra Mantra.mp3',
   '/Sunset Agnihotra Mantra.mp3',
@@ -13,116 +18,132 @@ const ASSETS_TO_CACHE = [
   '/cow-ghee.jpg',
   '/unpolished-rice.jpg',
   '/agnihotra-timing.jpg',
-  '/1110707675-preview.mp4',
-  '/favicons/web/icons8-fire-3d-fluency-16.png',
-  '/favicons/web/icons8-fire-3d-fluency-32.png',
-  '/favicons/web/icons8-fire-3d-fluency-57.png',
-  '/favicons/web/icons8-fire-3d-fluency-60.png',
-  '/favicons/web/icons8-fire-3d-fluency-70.png',
-  '/favicons/web/icons8-fire-3d-fluency-72.png',
-  '/favicons/web/icons8-fire-3d-fluency-76.png',
-  '/favicons/web/icons8-fire-3d-fluency-96.png',
-  'https://icono-49d6.kxcdn.com/icono.min.css',
-  'https://use.fontawesome.com/releases/v5.8.1/css/all.css',
-  'https://use.fontawesome.com/releases/v5.8.1/webfonts/fa-solid-900.woff2',
-  'https://use.fontawesome.com/releases/v5.8.1/webfonts/fa-solid-900.woff',
-  'https://use.fontawesome.com/releases/v5.8.1/webfonts/fa-regular-400.woff2',
-  'https://use.fontawesome.com/releases/v5.8.1/webfonts/fa-regular-400.woff',
-  'https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&family=Playfair+Display:wght@700&family=Noto+Sans+Devanagari:wght@400;500;600&display=swap'
+  '/1110707675-preview.mp4'
 ];
 
-// Install event - cache assets
+// Install event - only cache critical assets
 self.addEventListener('install', (event) => {
+  console.log('[SW] Installing...');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
-        console.log('Opened cache');
-        // Use individual add for each to prevent one failure from blocking all
+        console.log('[SW] Caching critical assets');
+        // Try to cache critical assets, but don't fail if some don't work
         return Promise.allSettled(
-          ASSETS_TO_CACHE.map(url => {
-            return cache.add(url).catch(err => console.warn(`Failed to cache ${url}:`, err));
-          })
+          CRITICAL_ASSETS.map(url => 
+            cache.add(url)
+              .then(() => console.log(`[SW] Cached: ${url}`))
+              .catch(err => console.warn(`[SW] Failed to cache ${url}:`, err.message))
+          )
         );
       })
+      .then(() => {
+        console.log('[SW] Install complete');
+        return self.skipWaiting();
+      })
+      .catch(err => {
+        console.error('[SW] Install failed:', err);
+      })
   );
-  self.skipWaiting();
 });
 
 // Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
+  console.log('[SW] Activating...');
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log('Deleting old cache:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
+    caches.keys()
+      .then((cacheNames) => {
+        return Promise.all(
+          cacheNames.map((cacheName) => {
+            if (cacheName !== CACHE_NAME) {
+              console.log('[SW] Deleting old cache:', cacheName);
+              return caches.delete(cacheName);
+            }
+          })
+        );
+      })
+      .then(() => {
+        console.log('[SW] Activated');
+        return self.clients.claim();
+      })
   );
-  return self.clients.claim();
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event - serve from cache, fallback to network, cache on success
 self.addEventListener('fetch', (event) => {
   // Skip non-http/https requests (like chrome-extension://)
   if (!event.request.url.startsWith('http')) {
     return;
   }
 
+  const url = new URL(event.request.url);
+  
+  // Skip API calls from caching logic
+  const isApiCall = 
+    url.hostname.includes('bigdatacloud.net') ||
+    url.hostname.includes('nominatim.openstreetmap.org') ||
+    url.hostname.includes('homatherapie.de');
+
+  if (isApiCall) {
+    // For API calls, just pass through to network
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        return new Response(JSON.stringify({ error: 'Network unavailable' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      })
+    );
+    return;
+  }
+
+  // For all other requests, use cache-first strategy
   event.respondWith(
     caches.match(event.request)
-      .then((response) => {
-        // Cache hit - return response
-        if (response) {
-          return response;
+      .then((cachedResponse) => {
+        if (cachedResponse) {
+          console.log('[SW] Serving from cache:', event.request.url);
+          return cachedResponse;
         }
 
-        // If offline and not in cache, return a custom response instead of trying to fetch
-        if (!navigator.onLine) {
-          return new Response('Offline and not in cache', { status: 503, statusText: 'Service Unavailable' });
-        }
-
-        return fetch(event.request).then(
-          (response) => {
-            // Check if we received a valid response
-            if (!response || response.status !== 200) {
-              return response;
+        // Not in cache, try network
+        console.log('[SW] Fetching from network:', event.request.url);
+        return fetch(event.request)
+          .then((networkResponse) => {
+            // Check if valid response
+            if (!networkResponse || networkResponse.status !== 200) {
+              console.log(`[SW] Invalid response for ${event.request.url}:`, networkResponse?.status);
+              return networkResponse;
             }
 
-            // Only cache certain types of responses
-            const shouldCache = 
-              response.type === 'basic' || // Same-origin
-              response.type === 'cors' ||   // CORS-enabled resources (fonts, CDN resources)
-              event.request.url.includes('fonts.gstatic.com') ||
-              event.request.url.includes('fonts.googleapis.com') ||
-              event.request.url.includes('use.fontawesome.com');
+            // Clone the response
+            const responseToCache = networkResponse.clone();
 
-            if (!shouldCache) {
-              return response;
-            }
-
-            const responseToCache = response.clone();
-
+            // Cache the response for future use
             caches.open(CACHE_NAME)
               .then((cache) => {
-                // Don't cache API calls, but DO cache fonts and CDN resources
-                const url = event.request.url;
-                if (!url.includes('api.bigdatacloud.net') && 
-                    !url.includes('nominatim.openstreetmap.org') &&
-                    !url.includes('homatherapie.de')) {
-                  cache.put(event.request, responseToCache);
-                }
+                console.log('[SW] Caching:', event.request.url);
+                cache.put(event.request, responseToCache).catch(err => {
+                  console.warn('[SW] Failed to cache:', event.request.url, err.message);
+                });
               });
 
-            return response;
-          }
-        ).catch(() => {
-          // Final fallback for actual network failures
-          return new Response('Network error occurred', { status: 408, statusText: 'Network Error' });
-        });
+            return networkResponse;
+          })
+          .catch((error) => {
+            console.error('[SW] Fetch failed:', event.request.url, error.message);
+            
+            // For navigation requests (HTML pages), try to return cached index.html
+            if (event.request.mode === 'navigate') {
+              return caches.match('/index.html');
+            }
+            
+            // For other resources, return a generic error response
+            return new Response('Offline - Resource not available', { 
+              status: 503, 
+              statusText: 'Service Unavailable' 
+            });
+          });
       })
   );
 });
