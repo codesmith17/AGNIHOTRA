@@ -51,6 +51,15 @@ nav {
   padding: 0 5%;
 }
 
+/* Shift navigation and content when offline indicator is visible */
+body.is-offline nav {
+  top: 29px; /* Matches the height of the offline indicator */
+}
+
+body.is-offline .hero {
+  padding-top: 109px; /* Original 80px + 29px */
+}
+
 #portrait-frame {
   display: flex;
   align-items: center;
