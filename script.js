@@ -856,6 +856,38 @@ function parseDateTime(dateStr, timeStr) {
 
 // Global object to store countdown data
 window.activeCountdowns = window.activeCountdowns || {};
+window.playedAlerts = window.playedAlerts || new Set();
+
+// Function to play a bell tone using Web Audio API
+function playBellTone() {
+  // Only play if the user is active on the page (tab is visible)
+  if (document.visibilityState !== "visible") return;
+
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+
+    const audioCtx = new AudioContext();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    // Create a bell-like sound (high frequency sine wave with decay)
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
+
+    gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.02);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 2);
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + 2);
+  } catch (e) {
+    console.warn("Audio playback failed (usually requires user interaction):", e);
+  }
+}
 
 function displayCountdownAndTime(element, type, time) {
   const itemDiv = document.createElement("div");
@@ -930,6 +962,17 @@ function updateCountdown(type, targetTime) {
 
     countdownElement.innerText = countdownText;
   } else {
+    // If time just passed and we haven't played the alert yet
+    const alertKey = `${type}_${targetTime}`;
+    if (!window.playedAlerts.has(alertKey)) {
+      // Only play if it passed recently (within last 10 seconds)
+      // and not if it's an old event from a previous page load
+      if (timeDiff > -10000) {
+        playBellTone();
+      }
+      window.playedAlerts.add(alertKey);
+    }
+
     countdownElement.innerText = "Time passed";
   }
 }
