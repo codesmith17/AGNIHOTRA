@@ -369,18 +369,19 @@ function getValidCachedData(lat, lng) {
 }
 
 // Function to save timings to cache
-function saveTimingsToCache(timings, lat, lng) {
+function saveTimingsToCache(timings, lat, lng, locationName = null) {
   const cacheData = {
     lastUpdated: Date.now(),
     lat: lat,
     lng: lng,
+    locationName: locationName, // Store the place name
     timings: timings,
   };
   localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
 }
 
 // Function to get sunrise and sunset - prioritize local precise calculation
-async function getSunriseSunset(lat, lng) {
+async function getSunriseSunset(lat, lng, locationName = null) {
   if (!lat || !lng) {
     console.error("No coordinates provided to getSunriseSunset");
     return;
@@ -428,8 +429,8 @@ async function getSunriseSunset(lat, lng) {
     }
 
     if (allTimings && Object.keys(allTimings).length > 0) {
-      // Save to cache
-      saveTimingsToCache(allTimings, lat, lng);
+      // Save to cache with location name
+      saveTimingsToCache(allTimings, lat, lng, locationName);
 
       const todayData = allTimings[todayFormatted];
       const tomorrowData = allTimings[tomorrowFormatted];
@@ -1104,9 +1105,15 @@ async function reverseGeocode(latitude, longitude) {
   try {
     // If offline, skip API calls and use cached data
     if (!navigator.onLine) {
+      // Try to get cached location name
+      const cache = getValidCachedData(latitude, longitude);
+      const locationDisplay = cache && cache.locationName 
+        ? cache.locationName 
+        : `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+      
       document.getElementById("userLocation").innerHTML = `
         <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Offline Mode:</span>
-        <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">Location: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}</span>
+        <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">${locationDisplay}</span>
       `;
       await getSunriseSunset(latitude, longitude);
       return;
@@ -1134,8 +1141,8 @@ async function reverseGeocode(latitude, longitude) {
                 <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">${address}</span>
             `;
 
-      // Call the async getSunriseSunset function
-      await getSunriseSunset(latitude, longitude);
+      // Call the async getSunriseSunset function and pass location name
+      await getSunriseSunset(latitude, longitude, address);
     } else {
       // Fallback to original BigDataCloud service if Nominatim fails
       const bdcResponse = await fetch(
@@ -1151,7 +1158,7 @@ async function reverseGeocode(latitude, longitude) {
         document.getElementById(
           "userLocation"
         ).innerText = `Your Location: ${location}`;
-        await getSunriseSunset(latitude, longitude);
+        await getSunriseSunset(latitude, longitude, location);
       } else {
         throw new Error("All geocoding services failed");
       }
@@ -1177,9 +1184,14 @@ async function reverseGeocodeApproximate(latitude, longitude) {
   try {
     // If offline, skip API call
     if (!navigator.onLine) {
+      const cache = getValidCachedData(latitude, longitude);
+      const locationDisplay = cache && cache.locationName 
+        ? `${cache.locationName} (approximate)` 
+        : `${latitude.toFixed(2)}, ${longitude.toFixed(2)} (approximate)`;
+      
       document.getElementById(
         "userLocation"
-      ).innerText = `Offline Mode: ${latitude.toFixed(2)}, ${longitude.toFixed(2)} (approximate)`;
+      ).innerText = `Offline Mode: ${locationDisplay}`;
       await getSunriseSunset(latitude, longitude);
       return;
     }
@@ -1199,8 +1211,8 @@ async function reverseGeocodeApproximate(latitude, longitude) {
         "userLocation"
       ).innerText = `Your Location: ${location} (approximate)`;
 
-      // Call the async getSunriseSunset function with approximate coordinates
-      await getSunriseSunset(latitude, longitude);
+      // Call the async getSunriseSunset function with approximate coordinates and location name
+      await getSunriseSunset(latitude, longitude, location);
     } else {
       // Fall back to coordinates display
       document.getElementById(
