@@ -1,2 +1,19 @@
 node_modules/*
 public/
+
+# Backup files
+*.backup
+*~
+*.bak
+script2.js
+
+# Video files (except project videos)
+*.mkv
+*.avi
+*.mov
+*.wmv
+*.flv
+
+# OS files
+.DS_Store
+Thumbs.db
