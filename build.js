@@ -22,7 +22,8 @@ const filesToCopy = [
     'cow-dung.webp',
     'cow-ghee.jpg',
     'unpolished-rice.jpg',
-    'agnihotra-timing.jpg'
+    'agnihotra-timing.jpg',
+    'bell-tone.mp3'
 ];
 
 // Folders to copy to public directory
