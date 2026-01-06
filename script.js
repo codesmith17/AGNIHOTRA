@@ -858,34 +858,116 @@ function parseDateTime(dateStr, timeStr) {
 window.activeCountdowns = window.activeCountdowns || {};
 window.playedAlerts = window.playedAlerts || new Set();
 
-// Function to play a bell tone using Web Audio API
+// Persistent AudioContext to be initialized on user gesture
+let audioCtx = null;
+let bellSound = null;
+
+// Function to initialize or resume AudioContext on user gesture
+function initAudio() {
+  if (!audioCtx) {
+    const AudioContext = window.AudioContext || window['webkitAudioContext'];
+    if (AudioContext) {
+      audioCtx = new AudioContext();
+    }
+  }
+  if (audioCtx && audioCtx.state === "suspended") {
+    audioCtx.resume();
+  }
+
+  // Pre-load the bell sound MP3
+  if (!bellSound) {
+    bellSound = new Audio('bell-tone.mp3');
+    bellSound.load();
+  }
+}
+
+// Unlock audio on common user interactions
+["click", "touchstart", "mousedown", "keydown"].forEach((event) => {
+  window.addEventListener(event, initAudio, { once: true });
+});
+
+/**
+ * DEBUG / TESTING FUNCTION
+ * Run window.testBell() in the browser console to set a test countdown
+ * that will trigger the bell tone in 5 seconds.
+ */
+window.testBell = function() {
+  console.log("Setting up test countdown for 5 seconds from now...");
+  initAudio(); // Ensure audio is initialized
+  
+  const testTime = Date.now() + 5000; // 5 seconds from now
+  const upcomingElement = document.getElementById("upcomingTimes");
+  
+  if (upcomingElement) {
+    // Add a test item to the UI
+    const itemDiv = document.createElement("div");
+    itemDiv.className = "time-item test-item";
+    itemDiv.style.border = "2px dashed #FF4500";
+    itemDiv.style.padding = "10px";
+    itemDiv.style.margin = "10px 0";
+    
+    itemDiv.innerHTML = `
+        <span class="time-label"><i class="fas fa-flask" style="color: #FF4500;"></i> TEST EVENT</span>
+        <span id="testCountdown" class="countdown-value">--h --m --s</span>
+        <span class="time-secondary">Triggering soon...</span>
+    `;
+    
+    upcomingElement.prepend(itemDiv);
+    
+    // Track this test event
+    window.activeCountdowns["test"] = testTime;
+    console.log("Test countdown started. Please keep this tab visible!");
+  } else {
+    console.error("Could not find #upcomingTimes element. Make sure location is detected first.");
+  }
+};
+
+// Function to play a bell tone using the MP3 file
 function playBellTone() {
   // Only play if the user is active on the page (tab is visible)
   if (document.visibilityState !== "visible") return;
 
   try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
+    if (!bellSound) {
+      bellSound = new Audio('bell-tone.mp3');
+    }
+    
+    // Play the sound exactly 4 times
+    let playCount = 0;
+    const maxPlays = 4;
+    
+    bellSound.loop = false; // Disable native looping to control count
+    
+    const playNext = () => {
+      if (playCount < maxPlays) {
+        bellSound.currentTime = 0;
+        const playPromise = bellSound.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            playCount++;
+          }).catch(error => {
+            console.warn("Audio playback failed:", error);
+          });
+        }
+      } else {
+        // Finished playing 4 times, remove the listener
+        bellSound.removeEventListener('ended', playNext);
+      }
+    };
 
-    const audioCtx = new AudioContext();
-    const oscillator = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
+    // Clean up any old listeners before adding a new one
+    bellSound.removeEventListener('ended', playNext);
+    bellSound.addEventListener('ended', playNext);
 
-    // Create a bell-like sound (high frequency sine wave with decay)
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
+    // Start the first play
+    playNext();
 
-    gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-    gainNode.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.02);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 2);
-
-    oscillator.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-
-    oscillator.start();
-    oscillator.stop(audioCtx.currentTime + 2);
+    // Also resume context just in case other audio features use it
+    if (audioCtx && audioCtx.state === "suspended") {
+      audioCtx.resume();
+    }
   } catch (e) {
-    console.warn("Audio playback failed (usually requires user interaction):", e);
+    console.warn("Audio playback failed:", e);
   }
 }
 
