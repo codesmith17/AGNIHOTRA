@@ -1,4 +1,4 @@
-const CACHE_NAME = 'agnihotra-cache-v5';
+const CACHE_NAME = 'agnihotra-cache-v6';
 
 // Critical assets to cache on install
 const CRITICAL_ASSETS = [
@@ -112,15 +112,28 @@ self.addEventListener('fetch', (event) => {
         return fetch(event.request)
           .then((networkResponse) => {
             // Check if valid response
-            if (!networkResponse || networkResponse.status !== 200) {
+            // Accept: 200-299 (success), 206 (partial content for media), or opaque responses (status 0 from CORS)
+            const isValidResponse = networkResponse && (
+              (networkResponse.status >= 200 && networkResponse.status < 300) ||
+              networkResponse.status === 206 ||
+              networkResponse.type === 'opaque'
+            );
+
+            if (!isValidResponse) {
               console.log(`[SW] Invalid response for ${event.request.url}:`, networkResponse?.status);
+              return networkResponse;
+            }
+
+            // Don't cache partial content (206) or opaque responses - just return them
+            if (networkResponse.status === 206 || networkResponse.type === 'opaque') {
+              console.log(`[SW] Not caching ${networkResponse.status === 206 ? 'partial content' : 'opaque response'}:`, event.request.url);
               return networkResponse;
             }
 
             // Clone the response
             const responseToCache = networkResponse.clone();
 
-            // Cache the response for future use
+            // Cache the response for future use (only for status 200-299)
             caches.open(CACHE_NAME)
               .then((cache) => {
                 console.log('[SW] Caching:', event.request.url);
