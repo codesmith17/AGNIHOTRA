@@ -122,6 +122,10 @@ body.is-offline .hero {
   display: none;
 }
 
+.current-language-badge {
+  display: none;
+}
+
 #nav-check {
   display: none;
 }
@@ -1085,6 +1089,19 @@ footer {
     border: 1px solid rgba(255, 255, 255, 0.18);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
     max-width: calc(100vw - 22px);
+  }
+
+  .current-language-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.25px;
+    white-space: nowrap;
   }
 
   .mobile-lang-switcher .lang-option {
