@@ -507,11 +507,16 @@ function getNextLanguage(lang) {
   return "en";
 }
 
-function getLanguageButtonLabel(lang) {
-  const next = getNextLanguage(lang);
-  if (next === "hi") return "हिंदी";
-  if (next === "mr") return "मराठी";
+function getLanguageDisplayName(lang) {
+  if (lang === "hi") return "हिन्दी";
+  if (lang === "mr") return "मराठी";
   return "English";
+}
+
+function getCurrentLanguageLabel(lang) {
+  if (lang === "hi") return `वर्तमान भाषा: ${getLanguageDisplayName(lang)}`;
+  if (lang === "mr") return `सध्याची भाषा: ${getLanguageDisplayName(lang)}`;
+  return `Current language: ${getLanguageDisplayName(lang)}`;
 }
 
 async function loadTranslations() {
@@ -543,7 +548,12 @@ function applyTranslations() {
 
   const toggleButton = document.getElementById("languageToggle");
   if (toggleButton) {
-    toggleButton.textContent = getLanguageButtonLabel(currentLanguage);
+    toggleButton.textContent = getCurrentLanguageLabel(currentLanguage);
+  }
+
+  const currentLanguageBadge = document.getElementById("currentLanguageBadge");
+  if (currentLanguageBadge) {
+    currentLanguageBadge.textContent = getCurrentLanguageLabel(currentLanguage);
   }
 
   document.querySelectorAll(".lang-option").forEach((btn) => {
