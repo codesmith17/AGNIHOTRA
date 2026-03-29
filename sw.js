@@ -1,25 +1,27 @@
-const CACHE_NAME = 'agnihotra-cache-v6';
+const CACHE_NAME = 'agnihotra-cache-v12';
 
 // Critical assets to cache on install
 const CRITICAL_ASSETS = [
   '/index.html',
   '/script.js',
   '/style.css',
-  '/agnihotra-icon.png'
+  '/assets/images/app-icon.png'
 ];
 
 // Assets to cache on-demand (as they're fetched)
 const CACHEABLE_RESOURCES = [
-  '/bell-tone.mp3',
-  '/Sunrise Agnihotra Mantra.mp3',
-  '/Sunset Agnihotra Mantra.mp3',
-  '/68fdb35faa0209f017128af309265ac2_icon.png',
-  '/copper-pyramid.jpg',
-  '/cow-dung.webp',
-  '/cow-ghee.jpg',
-  '/unpolished-rice.jpg',
-  '/agnihotra-timing.jpg',
-  '/1110707675-preview.mp4'
+  '/assets/audio/alerts/agnihotra-bell.mp3',
+  '/assets/audio/mantras/sunrise-mantra.mpeg',
+  '/assets/audio/mantras/sunset-mantra.mpeg',
+  '/assets/audio/mantras/panchasheel-pratidnya.mpeg',
+  '/assets/audio/mantras/saptashloki.mpeg',
+  '/assets/audio/mantras/trisatya-sharanagati.mpeg',
+  '/assets/images/eternalagni-icon.png',
+  '/assets/images/copper-pyramid.jpg',
+  '/assets/images/cow-dung-cakes.webp',
+  '/assets/images/cow-ghee.jpg',
+  '/assets/images/unpolished-rice-grains.jpg',
+  '/assets/images/agnihotra-timing-reference.jpg'
 ];
 
 // Install event - only cache critical assets
@@ -78,6 +80,10 @@ self.addEventListener('fetch', (event) => {
   }
 
   const url = new URL(event.request.url);
+  const isAudioRequest =
+    event.request.destination === 'audio' ||
+    url.pathname.endsWith('.mp3') ||
+    url.pathname.endsWith('.mpeg');
   
   // Skip API calls from caching logic
   const isApiCall = 
@@ -94,6 +100,31 @@ self.addEventListener('fetch', (event) => {
           headers: { 'Content-Type': 'application/json' }
         });
       })
+    );
+    return;
+  }
+
+  // For audio files, use network-first so updated mantra files are not stuck in old cache.
+  if (isAudioRequest) {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          const isValidResponse = networkResponse && (
+            (networkResponse.status >= 200 && networkResponse.status < 300) ||
+            networkResponse.status === 206 ||
+            networkResponse.type === 'opaque'
+          );
+
+          if (isValidResponse && networkResponse.status !== 206 && networkResponse.type !== 'opaque') {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseToCache).catch(() => {});
+            });
+          }
+
+          return networkResponse;
+        })
+        .catch(() => caches.match(event.request))
     );
     return;
   }

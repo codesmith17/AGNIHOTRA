@@ -858,10 +858,14 @@ function parseDateTime(dateStr, timeStr) {
 // Global object to store countdown data
 window.activeCountdowns = window.activeCountdowns || {};
 window.playedAlerts = window.playedAlerts || new Set();
+const PRE_ALERT_MINUTES = 15;
+const ALERT_WINDOW_MS = 10000; // Trigger if app checks within 10s of target
 
 // Persistent AudioContext to be initialized on user gesture
 let audioCtx = null;
 let bellSound = null;
+let wakeLockSentinel = null;
+let wakeLockMonitorInterval = null;
 
 // Function to initialize or resume AudioContext on user gesture
 function initAudio() {
@@ -877,7 +881,8 @@ function initAudio() {
 
   // Pre-load the bell sound MP3
   if (!bellSound) {
-    bellSound = new Audio('bell-tone.mp3');
+    bellSound = new Audio('assets/audio/alerts/agnihotra-bell.mp3');
+    bellSound.volume = 0.35;
     bellSound.load();
   }
 }
@@ -924,51 +929,102 @@ window.testBell = function() {
 };
 
 // Function to play a bell tone using the MP3 file
-function playBellTone() {
+function playBellTone(repeatCount = 1, volume = 0.35, gapMs = 450) {
   // Only play if the user is active on the page (tab is visible)
   if (document.visibilityState !== "visible") return;
 
+  const totalPlays = Math.max(1, Number(repeatCount) || 1);
+
   try {
-    if (!bellSound) {
-      bellSound = new Audio('bell-tone.mp3');
-    }
-    
-    // Play the sound exactly 4 times
     let playCount = 0;
-    const maxPlays = 4;
-    
-    bellSound.loop = false; // Disable native looping to control count
-    
+
     const playNext = () => {
-      if (playCount < maxPlays) {
-        bellSound.currentTime = 0;
-        const playPromise = bellSound.play();
-        if (playPromise !== undefined) {
-          playPromise.then(() => {
-            playCount++;
-          }).catch(error => {
-            console.warn("Audio playback failed:", error);
-          });
-        }
-      } else {
-        // Finished playing 4 times, remove the listener
-        bellSound.removeEventListener('ended', playNext);
+      if (playCount >= totalPlays) {
+        return;
+      }
+
+      const currentBell = new Audio('assets/audio/alerts/agnihotra-bell.mp3');
+      currentBell.volume = Math.max(0.05, Math.min(1, volume));
+      currentBell.loop = false;
+
+      const playPromise = currentBell.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((error) => {
+          console.warn("Audio playback failed:", error);
+        });
+      }
+
+      playCount++;
+      if (playCount < totalPlays) {
+        currentBell.addEventListener(
+          'ended',
+          () => {
+            setTimeout(playNext, gapMs);
+          },
+          { once: true }
+        );
       }
     };
 
-    // Clean up any old listeners before adding a new one
-    bellSound.removeEventListener('ended', playNext);
-    bellSound.addEventListener('ended', playNext);
-
-    // Start the first play
     playNext();
-
-    // Also resume context just in case other audio features use it
-    if (audioCtx && audioCtx.state === "suspended") {
-      audioCtx.resume();
-    }
   } catch (e) {
     console.warn("Audio playback failed:", e);
+  }
+}
+
+async function requestScreenWakeLock(forceReacquire = false) {
+  if (!('wakeLock' in navigator)) return false;
+  if (document.visibilityState !== 'visible') return false;
+  if (wakeLockSentinel && !forceReacquire) return true;
+
+  try {
+    if (wakeLockSentinel && forceReacquire) {
+      try {
+        await wakeLockSentinel.release();
+      } catch (_) {}
+      wakeLockSentinel = null;
+    }
+
+    wakeLockSentinel = await navigator.wakeLock.request('screen');
+    wakeLockSentinel.addEventListener('release', () => {
+      wakeLockSentinel = null;
+      // Some mobile browsers release wake lock during lifecycle changes.
+      // Re-acquire as soon as the page becomes active again.
+      if (document.visibilityState === 'visible') {
+        setTimeout(() => requestScreenWakeLock(), 300);
+      }
+    });
+    return true;
+  } catch (error) {
+    console.warn("Wake lock request failed:", error);
+    return false;
+  }
+}
+
+function setupScreenWakeLock() {
+  requestScreenWakeLock();
+
+  // Retry once after initial page setup for slower mobile browsers.
+  setTimeout(() => requestScreenWakeLock(), 1200);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      requestScreenWakeLock();
+    }
+  });
+
+  window.addEventListener('focus', () => requestScreenWakeLock());
+  window.addEventListener('pageshow', () => requestScreenWakeLock());
+
+  ["click", "touchstart", "mousedown", "keydown"].forEach((eventName) => {
+    window.addEventListener(eventName, () => requestScreenWakeLock());
+  });
+
+  // Keep checking periodically while app is open (phone-safe reliability).
+  if (!wakeLockMonitorInterval) {
+    wakeLockMonitorInterval = setInterval(() => {
+      requestScreenWakeLock();
+    }, 30000);
   }
 }
 
@@ -1021,11 +1077,35 @@ if (!window.countdownInterval) {
 function updateCountdown(type, targetTime) {
   const currentTime = Date.now();
   const timeDiff = targetTime - currentTime;
+  const preAlertTime = targetTime - PRE_ALERT_MINUTES * 60 * 1000;
 
   const countdownElement = document.getElementById(`${type}Countdown`);
 
   if (!countdownElement) {
     return; // Element doesn't exist, skip update
+  }
+
+  const preAlertKey = `${type}_${targetTime}_pre${PRE_ALERT_MINUTES}`;
+  const mainAlertKey = `${type}_${targetTime}_main`;
+
+  if (!window.playedAlerts.has(preAlertKey)) {
+    const preAlertDelta = currentTime - preAlertTime;
+    if (preAlertDelta >= 0 && preAlertDelta <= ALERT_WINDOW_MS) {
+      playBellTone(3, 0.28);
+      window.playedAlerts.add(preAlertKey);
+    } else if (preAlertDelta > ALERT_WINDOW_MS) {
+      window.playedAlerts.add(preAlertKey);
+    }
+  }
+
+  if (!window.playedAlerts.has(mainAlertKey)) {
+    const mainAlertDelta = currentTime - targetTime;
+    if (mainAlertDelta >= 0 && mainAlertDelta <= ALERT_WINDOW_MS) {
+      playBellTone(1, 0.32);
+      window.playedAlerts.add(mainAlertKey);
+    } else if (mainAlertDelta > ALERT_WINDOW_MS) {
+      window.playedAlerts.add(mainAlertKey);
+    }
   }
 
   if (timeDiff > 0) {
@@ -1045,17 +1125,6 @@ function updateCountdown(type, targetTime) {
 
     countdownElement.innerText = countdownText;
   } else {
-    // If time just passed and we haven't played the alert yet
-    const alertKey = `${type}_${targetTime}`;
-    if (!window.playedAlerts.has(alertKey)) {
-      // Only play if it passed recently (within last 10 seconds)
-      // and not if it's an old event from a previous page load
-      if (timeDiff > -10000) {
-        playBellTone();
-      }
-      window.playedAlerts.add(alertKey);
-    }
-
     countdownElement.innerText = "Time passed";
   }
 }
@@ -1356,6 +1425,7 @@ async function showError(error) {
   }
 
 window.onload = () => {
+  setupScreenWakeLock();
   getLocation();
   updateOnlineStatus();
 };
@@ -1575,6 +1645,9 @@ document.addEventListener("DOMContentLoaded", function () {
   // Initialize audio players
   initAudioPlayer('sunrise-audio');
   initAudioPlayer('sunset-audio');
+  initAudioPlayer('panchasheel-audio');
+  initAudioPlayer('saptashloki-audio');
+  initAudioPlayer('trisatya-audio');
   
   const fadeElements = document.querySelectorAll(".fade-in");
 
