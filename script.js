@@ -339,7 +339,7 @@ let translations = {};
 
 function getStoredLanguagePreference() {
   const saved = localStorage.getItem(TRANSLATION_STORAGE_KEY);
-  return saved === "hi" ? "hi" : "en";
+  return ["en", "hi", "mr"].includes(saved) ? saved : "en";
 }
 
 let currentLanguage = getStoredLanguagePreference();
@@ -501,6 +501,19 @@ function t(key, fallback = "") {
   return translations?.[currentLanguage]?.[key] || fallback;
 }
 
+function getNextLanguage(lang) {
+  if (lang === "en") return "hi";
+  if (lang === "hi") return "mr";
+  return "en";
+}
+
+function getLanguageButtonLabel(lang) {
+  const next = getNextLanguage(lang);
+  if (next === "hi") return "हिंदी";
+  if (next === "mr") return "मराठी";
+  return "English";
+}
+
 async function loadTranslations() {
   try {
     const response = await fetch("translations.json");
@@ -512,7 +525,7 @@ async function loadTranslations() {
 }
 
 function applyTranslations() {
-  document.documentElement.lang = currentLanguage === "hi" ? "hi" : "en";
+  document.documentElement.lang = currentLanguage;
   document.querySelectorAll("[data-i18n]").forEach((element) => {
     const key = element.getAttribute("data-i18n");
     const translated = t(key, element.textContent.trim());
@@ -527,21 +540,43 @@ function applyTranslations() {
       "Detecting your location..."
     );
   }
+
+  const toggleButton = document.getElementById("languageToggle");
+  if (toggleButton) {
+    toggleButton.textContent = getLanguageButtonLabel(currentLanguage);
+  }
+
+  document.querySelectorAll(".lang-option").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-lang") === currentLanguage);
+  });
 }
 
 function setupLanguageToggle() {
   const toggleButton = document.getElementById("languageToggle");
-  if (!toggleButton) return;
+  const langButtons = document.querySelectorAll(".lang-option");
 
   // Ensure there is always a valid persisted preference.
   localStorage.setItem(TRANSLATION_STORAGE_KEY, currentLanguage);
 
-  toggleButton.addEventListener("click", () => {
-    currentLanguage = currentLanguage === "en" ? "hi" : "en";
+  const setLanguage = (language) => {
+    currentLanguage = ["en", "hi", "mr"].includes(language) ? language : "en";
     localStorage.setItem(TRANSLATION_STORAGE_KEY, currentLanguage);
     applyTranslations();
     refreshUpcomingEvents();
+  };
+
+  if (toggleButton) {
+    toggleButton.addEventListener("click", () => {
+      setLanguage(getNextLanguage(currentLanguage));
+    });
+  }
+
+  langButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      setLanguage(button.getAttribute("data-lang"));
+    });
   });
+
   applyTranslations();
 }
 
