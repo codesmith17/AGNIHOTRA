@@ -1073,31 +1073,34 @@ footer {
   .mobile-lang-switcher {
     position: fixed;
     top: 68px;
-    right: 12px;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 1200;
     display: inline-flex;
     gap: 6px;
-    padding: 6px;
+    padding: 7px;
     border-radius: 999px;
     background: rgba(20, 20, 20, 0.62);
     backdrop-filter: blur(8px);
     border: 1px solid rgba(255, 255, 255, 0.18);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    max-width: calc(100vw - 22px);
   }
 
   .mobile-lang-switcher .lang-option {
     border: 0;
     border-radius: 999px;
-    min-width: 40px;
-    height: 30px;
-    padding: 0 10px;
-    font-size: 0.78rem;
+    min-width: 86px;
+    height: 32px;
+    padding: 0 12px;
+    font-size: 0.76rem;
     font-weight: 700;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.15px;
     color: #fff;
     background: transparent;
     cursor: pointer;
     transition: all 0.2s ease;
+    white-space: nowrap;
   }
 
   .mobile-lang-switcher .lang-option.active {
