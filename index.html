@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" translate="no" class="notranslate">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="google" content="notranslate">
+    <meta http-equiv="Content-Language" content="en,hi,mr">
     <title>EternalAgni | Precise Agnihotra Timings</title>
     <link rel="icon" type="image/png" sizes="32x32" href="assets/images/app-icon.png">
     <link rel="icon" type="image/png" sizes="16x16" href="assets/images/app-icon.png">
@@ -16,7 +18,7 @@
     <link rel="stylesheet" href="style.css">
 </head>
 
-<body>
+<body translate="no" class="notranslate">
     <div id="offline-indicator" style="display: none; background: #ff4500; color: white; text-align: center; padding: 5px; font-size: 0.8rem; position: fixed; top: 0; left: 0; right: 0; z-index: 1001;">
         <i class="fas fa-plane-slash"></i> Offline Mode - Using Cached Timings
     </div>
@@ -39,9 +41,14 @@
             <li><a href="#about-agnihotra" data-i18n="nav.about">ABOUT</a></li>
             <li><a href="#mantras" data-i18n="nav.mantras">MANTRAS</a></li>
             <li><a href="#schedule" data-i18n="nav.schedule">SCHEDULE</a></li>
-            <li><button id="languageToggle" type="button" class="language-toggle-btn" data-i18n="lang.toggle">हिंदी</button></li>
+            <li><button id="languageToggle" type="button" class="language-toggle-btn">हिंदी</button></li>
         </ul>
     </nav>
+    <div class="mobile-lang-switcher" aria-label="Language selector">
+        <button type="button" class="lang-option" data-lang="en">EN</button>
+        <button type="button" class="lang-option" data-lang="hi">हिं</button>
+        <button type="button" class="lang-option" data-lang="mr">मर</button>
+    </div>
 
     <header class="hero" id="home">
         <video autoplay muted loop playsinline class="hero-video" poster="assets/images/eternalagni-icon.png">
