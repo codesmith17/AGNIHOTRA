@@ -42,7 +42,12 @@ const foldersToCopy = [
 // Copy each file
 filesToCopy.forEach(file => {
     if (fs.existsSync(file)) {
-        fs.copyFileSync(file, path.join(publicDir, file));
+        const destinationPath = path.join(publicDir, file);
+        const destinationDir = path.dirname(destinationPath);
+        if (!fs.existsSync(destinationDir)) {
+            fs.mkdirSync(destinationDir, { recursive: true });
+        }
+        fs.copyFileSync(file, destinationPath);
         console.log(`Copied ${file} to public/`);
     } else {
         console.log(`⚠️  File not found: ${file}`);
