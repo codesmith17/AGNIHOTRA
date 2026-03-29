@@ -1941,6 +1941,12 @@ async function showError(error) {
   }
 
 window.onload = () => {
+  document.documentElement.setAttribute("translate", "no");
+  document.documentElement.classList.add("notranslate");
+  if (document.body) {
+    document.body.setAttribute("translate", "no");
+    document.body.classList.add("notranslate");
+  }
   debugLog("app:onload");
   setLocationLoading(true);
   setupLanguageToggle();
