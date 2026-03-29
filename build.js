@@ -11,6 +11,9 @@ if (!fs.existsSync(publicDir)) {
 // Files to copy to public directory
 const filesToCopy = [
     'index.html',
+    'translations.json',
+    'notifications.js',
+    'timings-engine.js',
     'script.js', 
     'style.css',
     'style.css.map',
