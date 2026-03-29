@@ -21,6 +21,7 @@ const filesToCopy = [
     'assets/audio/mantras/panchasheel-pratidnya.mpeg',
     'assets/audio/mantras/saptashloki.mpeg',
     'assets/audio/mantras/trisatya-sharanagati.mpeg',
+    'assets/video/fire-background.mp4',
     'assets/images/copper-pyramid.jpg',
     'assets/images/cow-dung-cakes.webp',
     'assets/images/cow-ghee.jpg',
