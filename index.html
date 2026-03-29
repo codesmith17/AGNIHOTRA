@@ -35,10 +35,11 @@
             </label>
         </div>
         <ul class="nav-links">
-            <li><a href="#home">HOME</a></li>
-            <li><a href="#about-agnihotra">ABOUT</a></li>
-            <li><a href="#mantras">MANTRAS</a></li>
-            <li><a href="#schedule">SCHEDULE</a></li>
+            <li><a href="#home" data-i18n="nav.home">HOME</a></li>
+            <li><a href="#about-agnihotra" data-i18n="nav.about">ABOUT</a></li>
+            <li><a href="#mantras" data-i18n="nav.mantras">MANTRAS</a></li>
+            <li><a href="#schedule" data-i18n="nav.schedule">SCHEDULE</a></li>
+            <li><button id="languageToggle" type="button" class="language-toggle-btn" data-i18n="lang.toggle">हिंदी</button></li>
         </ul>
     </nav>
 
@@ -48,73 +49,73 @@
             Your browser does not support the video tag.
         </video>
         <div class="hero-content fade-in">
-            <h1 class="hero-title">Healing through Fire</h1>
-            <p>Agnihotra is a healing fire from the ancient science of Ayurveda. It is a process of purifying the atmosphere through a specially prepared fire performed daily at sunrise and sunset.</p>
-            <a href="#dashboard" class="btn-primary">Get Timings</a>
+            <h1 class="hero-title" data-i18n="hero.title">Healing through Fire</h1>
+            <p data-i18n="hero.subtitle">Agnihotra is a healing fire from the ancient science of Ayurveda. It is a process of purifying the atmosphere through a specially prepared fire performed daily at sunrise and sunset.</p>
+            <a href="#dashboard" class="btn-primary" data-i18n="hero.cta">Get Timings</a>
         </div>
     </header>
 
     <section class="about-section fade-in" id="about-agnihotra">
-        <h2>What is Agnihotra?</h2>
+        <h2 data-i18n="about.title">What is Agnihotra?</h2>
         <div class="about-grid">
             <div class="about-item">
                 <i class="fas fa-mountain fa-2x"></i>
-                <h3>Nature's Rhythm</h3>
-                <p>Performed exactly at the transition from night to day and day to night, capturing the peak energy of our planet.</p>
+                <h3 data-i18n="about.rhythm.title">Nature's Rhythm</h3>
+                <p data-i18n="about.rhythm.desc">Performed exactly at the transition from night to day and day to night, capturing the peak energy of our planet.</p>
             </div>
             <div class="about-item">
                 <i class="fas fa-fire fa-2x"></i>
-                <h3>Atmospheric Purification</h3>
-                <p>The copper pyramid and specific materials create a resonance that heals the environment, plants, and humans.</p>
+                <h3 data-i18n="about.purification.title">Atmospheric Purification</h3>
+                <p data-i18n="about.purification.desc">The copper pyramid and specific materials create a resonance that heals the environment, plants, and humans.</p>
             </div>
             <div class="about-item">
                 <i class="fas fa-leaf fa-2x"></i>
-                <h3>Total Healing</h3>
-                <p>The ash produced is a powerful fertilizer and medicine, containing all 92 natural elements in a highly bio-available form.</p>
+                <h3 data-i18n="about.healing.title">Total Healing</h3>
+                <p data-i18n="about.healing.desc">The ash produced is a powerful fertilizer and medicine, containing all 92 natural elements in a highly bio-available form.</p>
             </div>
         </div>
     </section>
     
     <section class="materials-section fade-in" id="materials">
         <center>
-            <h2>Five Essential Materials</h2>
-            <p class="section-desc">The specific combination of these five elements creates the powerful healing atmosphere of Agnihotra.</p>
+            <h2 data-i18n="materials.title">Five Essential Materials</h2>
+            <p class="section-desc" data-i18n="materials.subtitle">The specific combination of these five elements creates the powerful healing atmosphere of Agnihotra.</p>
         </center>
         <div class="materials-grid">
             <div class="material-card">
                 <div class="material-icon">
                     <img src="assets/images/copper-pyramid.jpg" alt="Copper Pyramid" loading="lazy">
                 </div>
-                <h3>Copper Pyramid</h3>
-                <p>A vessel of specific size and shape. Copper is a conductor for subtle energies and its pyramid shape generates resonance.</p>
+                <h3 data-i18n="materials.copper.title">Copper Pyramid</h3>
+                <p data-i18n="materials.copper.desc">A vessel of specific size and shape. Copper is a conductor for subtle energies and its pyramid shape generates resonance.</p>
             </div>
             <div class="material-card">
                 <div class="material-icon">
                     <img src="assets/images/cow-dung-cakes.webp" alt="Dried Cow Dung" loading="lazy">
                 </div>
-                <h3>Dried Cow Dung</h3>
-                <p>Used as fuel. It contains a wealth of medicinal properties and burns with a pure, therapeutic smoke.</p>
+                <h3 data-i18n="materials.dung.title">Dried Cow Dung</h3>
+                <p data-i18n="materials.dung.desc">Used as fuel. It contains a wealth of medicinal properties and burns with a pure, therapeutic smoke.</p>
             </div>
             <div class="material-card">
                 <div class="material-icon">
                     <img src="assets/images/cow-ghee.jpg" alt="Pure Cow Ghee" loading="lazy">
                 </div>
-                <h3>Pure Cow Ghee</h3>
-                <p>Clarified butter from cow's milk. It acts as a powerful catalyst, releasing medicinal properties into the air.</p>
+                <h3 data-i18n="materials.ghee.title">Pure Cow Ghee</h3>
+                <p data-i18n="materials.ghee.desc">Clarified butter from cow's milk. It acts as a powerful catalyst, releasing medicinal properties into the air.</p>
             </div>
             <div class="material-card">
                 <div class="material-icon">
                     <img src="assets/images/unpolished-rice-grains.jpg" alt="Unpolished Rice" loading="lazy">
                 </div>
-                <h3>Unpolished Rice</h3>
-                <p>Two pinches of whole, unbroken grains. Rice symbolizes the seed of life and holds the vibrational charge of the mantras.</p>
+                <h3 data-i18n="materials.rice.title">Unpolished Rice</h3>
+                <p data-i18n="materials.rice.desc">Two pinches of whole, unbroken grains. Rice symbolizes the seed of life and holds the vibrational charge of the mantras.</p>
             </div>
             <div class="material-card">
                 <div class="material-icon">
                     <img src="assets/images/agnihotra-timing-reference.jpg" alt="Precise Timing" loading="lazy">
                 </div>
-                <h3>Precise Timing</h3>
-                <p>The transition moments of sunrise and sunset. This synchronization allows the fire to capture peak solar energy.</p>
+                <h3 data-i18n="materials.timing.title">Precise Timing</h3>
+                <p data-i18n="materials.timing.desc">The transition moments of sunrise and sunset. This synchronization allows the fire to capture peak solar energy.</p>
             </div>
         </div>
     </section>
@@ -122,23 +123,27 @@
     <div class="dashboard-anchor" id="dashboard"></div>
     <div class="content-wrap">
         <div class="card location-info">
-            <h2>Location</h2>
-            <p id="userLocation">Detecting your location...</p>
+            <h2 data-i18n="dashboard.location">Location</h2>
+            <div id="locationStatus" class="location-status" aria-live="polite">
+                <span class="loading-spinner" aria-hidden="true"></span>
+                <span id="locationLoadingText" data-i18n="dashboard.detectingLocation">Detecting your location...</span>
+            </div>
+            <p id="userLocation"></p>
         </div>
 
         <div class="timing-grid">
             <div class="card upcoming-times">
-                <h2 class="section-title">Next Agnihotra</h2>
+                <h2 class="section-title" data-i18n="dashboard.nextAgnihotra">Next Agnihotra</h2>
                 <ul id="upcomingTimes" class="times-list"></ul>
             </div>
 
             <div class="card today-times">
-                <h2 class="section-title">Today's Timings</h2>
+                <h2 class="section-title" data-i18n="dashboard.todayTimings">Today's Timings</h2>
                 <ul id="todayTimes" class="times-list"></ul>
             </div>
 
             <div class="card tomorrow-times">
-                <h2 class="section-title">Tomorrow's Timings</h2>
+                <h2 class="section-title" data-i18n="dashboard.tomorrowTimings">Tomorrow's Timings</h2>
                 <ul id="tomorrowTimes" class="times-list"></ul>
             </div>
         </div>
@@ -146,8 +151,8 @@
 
     <section class="mantras-container" id="mantras">
         <center>
-            <h2 class="fade-in">Agnihotra Mantras</h2>
-            <p class="mantra-desc">Mantras are specific vibrations that catalyze the healing process during the fire.</p>
+            <h2 class="fade-in" data-i18n="mantras.title">Agnihotra Mantras</h2>
+            <p class="mantra-desc" data-i18n="mantras.subtitle">Mantras are specific vibrations that catalyze the healing process during the fire.</p>
         </center>
 
         <div class="mantras-section fade-in">
@@ -365,17 +370,21 @@
 
     <section id="schedule">
         <center>
-            <h2 class="fade-in">3-Month Timing Schedule</h2>
+            <h2 class="fade-in" data-i18n="schedule.title">3-Month Timing Schedule</h2>
         </center>
 
         <div class="schedule-section fade-in">
+            <div id="scheduleLoading" class="schedule-loading" style="display: none;" aria-live="polite">
+                <span class="loading-spinner" aria-hidden="true"></span>
+                <span data-i18n="schedule.preparing">Preparing 3-month schedule in background...</span>
+            </div>
             <div class="table-container">
                 <table id="timingsTable">
                     <thead>
                         <tr>
-                            <th>Date</th>
-                            <th>Sunrise</th>
-                            <th>Sunset</th>
+                            <th data-i18n="schedule.date">Date</th>
+                            <th data-i18n="schedule.sunrise">Sunrise</th>
+                            <th data-i18n="schedule.sunset">Sunset</th>
                         </tr>
                     </thead>
                     <tbody id="timingsTableBody">
@@ -387,9 +396,11 @@
     </section>
 
     <footer>
-        <p>&copy; 2026 EternalAgni. Spreading the Light of Agnihotra.</p>
+        <p data-i18n="footer.text">&copy; 2026 EternalAgni. Spreading the Light of Agnihotra.</p>
     </footer>
 
+    <script src="notifications.js"></script>
+    <script src="timings-engine.js"></script>
     <script src="script.js"></script>
 </body>
 

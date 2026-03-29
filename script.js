@@ -332,6 +332,253 @@ function formatDateToDDMMYYYY(date) {
 
 const CACHE_KEY = "agnihotra_timings_cache";
 const CACHE_EXPIRY_MS = 6 * 30 * 24 * 60 * 60 * 1000; // 6 months in milliseconds
+const TRANSLATION_STORAGE_KEY = "agnihotra_language";
+const DEBUG_STORAGE_KEY = "agnihotra_debug";
+const LAST_KNOWN_LOCATION_KEY = "agnihotra_last_known_location";
+let translations = {};
+
+function getStoredLanguagePreference() {
+  const saved = localStorage.getItem(TRANSLATION_STORAGE_KEY);
+  return saved === "hi" ? "hi" : "en";
+}
+
+let currentLanguage = getStoredLanguagePreference();
+
+function isDebugEnabled() {
+  return localStorage.getItem(DEBUG_STORAGE_KEY) === "1";
+}
+
+function debugLog(stage, payload = null) {
+  if (!isDebugEnabled()) return;
+  if (payload === null) {
+    console.log(`[AGNIHOTRA][${stage}]`);
+  } else {
+    console.log(`[AGNIHOTRA][${stage}]`, payload);
+  }
+}
+
+function locationLog(stage, payload = null) {
+  if (payload === null) {
+    console.info(`[AGNIHOTRA][LOCATION] ${stage}`);
+  } else {
+    console.info(`[AGNIHOTRA][LOCATION] ${stage}`, payload);
+  }
+  window.__agnihotraLastLocationMeta = {
+    stage,
+    payload,
+    at: new Date().toISOString()
+  };
+}
+
+window.enableAgnihotraDebug = function() {
+  localStorage.setItem(DEBUG_STORAGE_KEY, "1");
+  console.log("[AGNIHOTRA] Debug logging enabled.");
+};
+
+window.disableAgnihotraDebug = function() {
+  localStorage.removeItem(DEBUG_STORAGE_KEY);
+  console.log("[AGNIHOTRA] Debug logging disabled.");
+};
+
+function saveLastKnownLocation(lat, lng, locationName = null) {
+  try {
+    localStorage.setItem(
+      LAST_KNOWN_LOCATION_KEY,
+      JSON.stringify({
+        lat,
+        lng,
+        locationName,
+        savedAt: Date.now(),
+      })
+    );
+  } catch (_) {}
+}
+
+function getLastKnownLocation() {
+  try {
+    const raw = localStorage.getItem(LAST_KNOWN_LOCATION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.lat !== "number" || typeof parsed?.lng !== "number") {
+      return null;
+    }
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+let preciseLocationRetryInFlight = false;
+
+function retryPreciseLocationInBackground(reason = "unknown") {
+  if (!navigator.geolocation || preciseLocationRetryInFlight) return;
+  preciseLocationRetryInFlight = true;
+  const startedAt = performance.now();
+  locationLog("precise-retry-start", { reason });
+
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      preciseLocationRetryInFlight = false;
+      const latitude = position.coords.latitude;
+      const longitude = position.coords.longitude;
+      locationLog("precise-retry-success", {
+        lat: latitude,
+        lng: longitude,
+        accuracyMeters: position.coords.accuracy,
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
+
+      document.getElementById(
+        "userLocation"
+      ).innerText = `Your Location: Latitude ${latitude}, Longitude ${longitude}`;
+      saveLastKnownLocation(latitude, longitude);
+
+      const timingsPromise = getSunriseSunset(latitude, longitude);
+      await reverseGeocode(latitude, longitude, true);
+      await timingsPromise;
+    },
+    (error) => {
+      preciseLocationRetryInFlight = false;
+      locationLog("precise-retry-failed", {
+        code: error?.code,
+        message: error?.message,
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 20000,
+      maximumAge: 0
+    }
+  );
+}
+
+function getCurrentPositionAsync(options) {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
+}
+
+async function tryImmediatePreciseLocationRecovery() {
+  if (!navigator.geolocation) return null;
+  const startedAt = performance.now();
+  try {
+    const position = await getCurrentPositionAsync({
+      enableHighAccuracy: true,
+      timeout: 8000,
+      maximumAge: 0
+    });
+    const latitude = position.coords.latitude;
+    const longitude = position.coords.longitude;
+    locationLog("gps-recovery-success", {
+      lat: latitude,
+      lng: longitude,
+      accuracyMeters: position.coords.accuracy,
+      elapsedMs: Math.round(performance.now() - startedAt)
+    });
+    return { latitude, longitude };
+  } catch (error) {
+    locationLog("gps-recovery-failed", {
+      code: error?.code,
+      message: error?.message,
+      elapsedMs: Math.round(performance.now() - startedAt)
+    });
+    return null;
+  }
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function t(key, fallback = "") {
+  return translations?.[currentLanguage]?.[key] || fallback;
+}
+
+async function loadTranslations() {
+  try {
+    const response = await fetch("translations.json");
+    if (!response.ok) return;
+    translations = await response.json();
+  } catch (error) {
+    console.warn("Unable to load translations:", error);
+  }
+}
+
+function applyTranslations() {
+  document.documentElement.lang = currentLanguage === "hi" ? "hi" : "en";
+  document.querySelectorAll("[data-i18n]").forEach((element) => {
+    const key = element.getAttribute("data-i18n");
+    const translated = t(key, element.textContent.trim());
+    if (translated) {
+      element.textContent = translated;
+    }
+  });
+  const locationLoadingText = document.getElementById("locationLoadingText");
+  if (locationLoadingText) {
+    locationLoadingText.textContent = t(
+      "dashboard.detectingLocation",
+      "Detecting your location..."
+    );
+  }
+}
+
+function setupLanguageToggle() {
+  const toggleButton = document.getElementById("languageToggle");
+  if (!toggleButton) return;
+
+  // Ensure there is always a valid persisted preference.
+  localStorage.setItem(TRANSLATION_STORAGE_KEY, currentLanguage);
+
+  toggleButton.addEventListener("click", () => {
+    currentLanguage = currentLanguage === "en" ? "hi" : "en";
+    localStorage.setItem(TRANSLATION_STORAGE_KEY, currentLanguage);
+    applyTranslations();
+    refreshUpcomingEvents();
+  });
+  applyTranslations();
+}
+
+function refreshUpcomingEvents() {
+  const todayTimes = document.getElementById("todayTimes");
+  const tomorrowTimes = document.getElementById("tomorrowTimes");
+  if (!todayTimes || !tomorrowTimes) return;
+  const todayHeader = todayTimes.querySelector(".card-date-header");
+  const tomorrowHeader = tomorrowTimes.querySelector(".card-date-header");
+  if (!todayHeader || !tomorrowHeader) return;
+
+  const todayData = {
+    date: todayHeader.innerText,
+    sunrise: todayTimes.querySelectorAll(".time-value")[0]?.innerText || "",
+    sunset: todayTimes.querySelectorAll(".time-value")[1]?.innerText || "",
+  };
+  const tomorrowData = {
+    date: tomorrowHeader.innerText,
+    sunrise: tomorrowTimes.querySelectorAll(".time-value")[0]?.innerText || "",
+    sunset: tomorrowTimes.querySelectorAll(".time-value")[1]?.innerText || "",
+  };
+  if (todayData.date && tomorrowData.date) {
+    displayUpcomingTimings(todayData, tomorrowData, "upcomingTimes");
+  }
+}
+
+function setLocationLoading(isLoading) {
+  const status = document.getElementById("locationStatus");
+  if (!status) return;
+  status.style.display = isLoading ? "inline-flex" : "none";
+}
+
+function setScheduleLoading(isLoading) {
+  const status = document.getElementById("scheduleLoading");
+  if (!status) return;
+  status.style.display = isLoading ? "inline-flex" : "none";
+}
 
 // Function to check and get valid cached data
 function getValidCachedData(lat, lng) {
@@ -380,12 +627,52 @@ function saveTimingsToCache(timings, lat, lng, locationName = null) {
   localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
 }
 
+let latestBackgroundTimingJob = 0;
+
+function startBackgroundTimingGeneration(lat, lng, locationName, todayData, tomorrowData) {
+  const myJobId = ++latestBackgroundTimingJob;
+  const startedAt = performance.now();
+  debugLog("background-3month:start", { jobId: myJobId, lat, lng });
+  setScheduleLoading(true);
+  setTimeout(async () => {
+    try {
+      const generatedTimings = await (window.AgnihotraTimingEngine?.generateRangeTimings
+        ? window.AgnihotraTimingEngine.generateRangeTimings(lat, lng, 92, new Date())
+        : Promise.resolve(generateLocal6MonthTimings(lat, lng)));
+
+      if (myJobId !== latestBackgroundTimingJob || !generatedTimings) return;
+
+      if (todayData?.date) generatedTimings[todayData.date] = todayData;
+      if (tomorrowData?.date) generatedTimings[tomorrowData.date] = tomorrowData;
+
+      saveTimingsToCache(generatedTimings, lat, lng, locationName);
+      displayFullSchedule(generatedTimings);
+      setScheduleLoading(false);
+      debugLog("background-3month:done", {
+        jobId: myJobId,
+        days: Object.keys(generatedTimings).length,
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
+    } catch (error) {
+      console.warn("Background timing generation failed:", error);
+      setScheduleLoading(false);
+      debugLog("background-3month:error", {
+        jobId: myJobId,
+        error: error?.message || String(error)
+      });
+    }
+  }, 0);
+}
+
 // Function to get sunrise and sunset - prioritize local precise calculation
 async function getSunriseSunset(lat, lng, locationName = null) {
   if (!lat || !lng) {
     console.error("No coordinates provided to getSunriseSunset");
     return;
   }
+
+  const startedAt = performance.now();
+  debugLog("timings:start", { lat, lng });
 
   try {
     const today = new Date();
@@ -395,7 +682,7 @@ async function getSunriseSunset(lat, lng, locationName = null) {
     const todayFormatted = formatDateToDDMMYYYY(today);
     const tomorrowFormatted = formatDateToDDMMYYYY(tomorrow);
 
-    // 1. Check cache first
+    // 1) Check cache first for instant display
     const cache = getValidCachedData(lat, lng);
     if (cache && cache.timings[todayFormatted]) {
       const todayData = cache.timings[todayFormatted];
@@ -407,51 +694,49 @@ async function getSunriseSunset(lat, lng, locationName = null) {
       if (todayData && tomorrowData) {
         displayUpcomingTimings(todayData, tomorrowData, "upcomingTimes");
         displayFullSchedule(cache.timings);
+        setLocationLoading(false);
+        setScheduleLoading(false);
+        debugLog("timings:cache-hit", {
+          elapsedMs: Math.round(performance.now() - startedAt),
+          days: Object.keys(cache.timings || {}).length
+        });
         return;
       }
     }
 
-    // 2. Primary Method: Local High-Precision Astronomical Calculation
-    // This reproduces Homatherapy Germany timings locally
-    let allTimings = generateLocal6MonthTimings(lat, lng);
+    // 2) Compute only today + tomorrow first (fast UX)
+    const tzOffsetHours = -(new Date().getTimezoneOffset() / 60);
+    let todayData = window.AgnihotraTimingEngine?.calculateDayTiming
+      ? window.AgnihotraTimingEngine.calculateDayTiming(today, lat, lng, tzOffsetHours)
+      : null;
+    let tomorrowData = window.AgnihotraTimingEngine?.calculateDayTiming
+      ? window.AgnihotraTimingEngine.calculateDayTiming(tomorrow, lat, lng, tzOffsetHours)
+      : null;
 
-    // 3. Fallback Method: Scrape from homatherapie.de if local calculation isn't enough or as a secondary check
-    if (!allTimings || Object.keys(allTimings).length === 0) {
-      const endDate = new Date();
-      endDate.setMonth(endDate.getMonth() + 6);
-      const endDateFormatted = formatDateToDDMMYYYY(endDate);
-      allTimings = await fetchSunriseSunsetData(
-        todayFormatted,
-        lat,
-        lng,
-        endDateFormatted
-      );
+    if (!todayData || !tomorrowData) {
+      // Fallback source for immediate display if local calc fails
+      await getSunriseSunsetFromSunAPI(lat, lng, todayData, tomorrowData);
+      // Use the rendered values if fallback path handled it.
+      return;
     }
 
-    if (allTimings && Object.keys(allTimings).length > 0) {
-      // Save to cache with location name
-      saveTimingsToCache(allTimings, lat, lng, locationName);
+    displaySunriseSunset(todayData, "todayTimes");
+    displaySunriseSunset(tomorrowData, "tomorrowTimes");
+    displayUpcomingTimings(todayData, tomorrowData, "upcomingTimes");
+    setLocationLoading(false);
+    debugLog("timings:fast-path-ready", {
+      elapsedMs: Math.round(performance.now() - startedAt)
+    });
 
-      const todayData = allTimings[todayFormatted];
-      const tomorrowData = allTimings[tomorrowFormatted];
-
-      if (todayData) displaySunriseSunset(todayData, "todayTimes");
-      if (tomorrowData) displaySunriseSunset(tomorrowData, "tomorrowTimes");
-
-      if (todayData && tomorrowData) {
-        displayUpcomingTimings(todayData, tomorrowData, "upcomingTimes");
-      } else {
-        // Second Fallback: sunrisesunset.io
-        await getSunriseSunsetFromSunAPI(lat, lng, todayData, tomorrowData);
-      }
-
-      // Display the full schedule table
-      displayFullSchedule(allTimings);
-    } else {
-      throw new Error("All primary timing methods failed");
-    }
+    // 3) Build the 3-month schedule in background
+    startBackgroundTimingGeneration(lat, lng, locationName, todayData, tomorrowData);
   } catch (error) {
     console.error("Timing calculation/fetch failed:", error);
+    setScheduleLoading(false);
+    debugLog("timings:error", {
+      elapsedMs: Math.round(performance.now() - startedAt),
+      error: error?.message || String(error)
+    });
     await getSunriseSunsetFromSunAPI(lat, lng);
   }
 }
@@ -632,10 +917,7 @@ async function getSunriseSunsetFromSunAPI(
     displayUpcomingTimings(todayData, tomorrowData, "upcomingTimes");
   } catch (error) {
     console.error("Error with sunrisesunset.io API:", error);
-    const loadingSpinner = document.querySelector(".loading-spinner");
-    if (loadingSpinner) {
-      loadingSpinner.style.display = "none";
-    }
+    setLocationLoading(false);
   }
 }
 
@@ -652,14 +934,14 @@ function displaySunriseSunset(results, elementId) {
   const sunriseDiv = document.createElement("div");
   sunriseDiv.className = "time-item";
   sunriseDiv.innerHTML = `
-        <span class="time-label"><i class="fas fa-sun" style="color: #FFD700;"></i> SUNRISE</span>
+        <span class="time-label"><i class="fas fa-sun" style="color: #FFD700;"></i> ${t("timeLabels.sunrise", "SUNRISE")}</span>
         <span class="time-value">${formatTimeToAMPM(results.sunrise)}</span>
     `;
 
   const sunsetDiv = document.createElement("div");
   sunsetDiv.className = "time-item";
   sunsetDiv.innerHTML = `
-        <span class="time-label"><i class="fas fa-moon" style="color: #4B0082;"></i> SUNSET</span>
+        <span class="time-label"><i class="fas fa-moon" style="color: #4B0082;"></i> ${t("timeLabels.sunset", "SUNSET")}</span>
         <span class="time-value">${formatTimeToAMPM(results.sunset)}</span>
     `;
 
@@ -757,6 +1039,7 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
   // Clear previous content and countdowns
   element.innerHTML = "";
   window.activeCountdowns = {}; // Clear all active countdowns
+  window.countdownLabels = {};
 
   // Find the next upcoming event(s) based on current time
   const upcomingEvents = [];
@@ -764,21 +1047,57 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
   // Check what's coming next - always show the next 2 upcoming events
   if (currentTime < todaySunriseTime) {
     // Before today's sunrise - show today's sunrise and sunset
-    upcomingEvents.push(["Today's Sunrise", todaySunriseTime]);
-    upcomingEvents.push(["Today's Sunset", todaySunsetTime]);
+    upcomingEvents.push({
+      id: "todayssunrise",
+      label: t("events.todaysSunrise", "Today's Sunrise"),
+      time: todaySunriseTime,
+      isSunrise: true
+    });
+    upcomingEvents.push({
+      id: "todayssunset",
+      label: t("events.todaysSunset", "Today's Sunset"),
+      time: todaySunsetTime,
+      isSunrise: false
+    });
   } else if (currentTime < todaySunsetTime) {
     // After today's sunrise but before today's sunset - show today's sunset and tomorrow's sunrise
-    upcomingEvents.push(["Today's Sunset", todaySunsetTime]);
-    upcomingEvents.push(["Tomorrow's Sunrise", tomorrowSunriseTime]);
+    upcomingEvents.push({
+      id: "todayssunset",
+      label: t("events.todaysSunset", "Today's Sunset"),
+      time: todaySunsetTime,
+      isSunrise: false
+    });
+    upcomingEvents.push({
+      id: "tomorrowssunrise",
+      label: t("events.tomorrowsSunrise", "Tomorrow's Sunrise"),
+      time: tomorrowSunriseTime,
+      isSunrise: true
+    });
   } else {
     // After today's sunset - show tomorrow's sunrise and sunset
-    upcomingEvents.push(["Tomorrow's Sunrise", tomorrowSunriseTime]);
-    upcomingEvents.push(["Tomorrow's Sunset", tomorrowSunsetTime]);
+    upcomingEvents.push({
+      id: "tomorrowssunrise",
+      label: t("events.tomorrowsSunrise", "Tomorrow's Sunrise"),
+      time: tomorrowSunriseTime,
+      isSunrise: true
+    });
+    upcomingEvents.push({
+      id: "tomorrowssunset",
+      label: t("events.tomorrowsSunset", "Tomorrow's Sunset"),
+      time: tomorrowSunsetTime,
+      isSunrise: false
+    });
   }
 
   // Display the upcoming events
-  upcomingEvents.forEach(([eventName, eventTime]) => {
-    displayCountdownAndTime(element, eventName, eventTime);
+  upcomingEvents.forEach((eventItem) => {
+    displayCountdownAndTime(
+      element,
+      eventItem.id,
+      eventItem.label,
+      eventItem.time,
+      eventItem.isSunrise
+    );
   });
 }
 
@@ -857,6 +1176,7 @@ function parseDateTime(dateStr, timeStr) {
 
 // Global object to store countdown data
 window.activeCountdowns = window.activeCountdowns || {};
+window.countdownLabels = window.countdownLabels || {};
 window.playedAlerts = window.playedAlerts || new Set();
 const PRE_ALERT_MINUTES = 15;
 const ALERT_WINDOW_MS = 10000; // Trigger if app checks within 10s of target
@@ -866,7 +1186,6 @@ let audioCtx = null;
 let bellSound = null;
 let wakeLockSentinel = null;
 let wakeLockMonitorInterval = null;
-let notificationPermissionRequested = false;
 
 // Function to initialize or resume AudioContext on user gesture
 function initAudio() {
@@ -893,99 +1212,6 @@ function initAudio() {
   window.addEventListener(event, initAudio, { once: true });
 });
 
-async function requestNotificationPermission() {
-  if (!("Notification" in window)) return false;
-  if (Notification.permission === "granted") return true;
-  if (Notification.permission === "denied") return false;
-  if (notificationPermissionRequested) return false;
-
-  notificationPermissionRequested = true;
-  try {
-    const permission = await Notification.requestPermission();
-    return permission === "granted";
-  } catch (error) {
-    console.warn("Notification permission request failed:", error);
-    return false;
-  }
-}
-
-async function showAgnihotraNotification(title, body, tag) {
-  if (!("Notification" in window)) return;
-  if (Notification.permission !== "granted") return;
-
-  // In-app fallback so alerts are visible even when OS shows panel-only notifications.
-  showInAppAlertToast(title, body);
-
-  const options = {
-    body,
-    tag,
-    renotify: true,
-    icon: "assets/images/app-icon.png",
-    badge: "assets/images/app-icon.png",
-    vibrate: [300, 200, 300],
-    requireInteraction: true,
-  };
-
-  try {
-    const registration = await navigator.serviceWorker.getRegistration();
-    if (registration) {
-      await registration.showNotification(title, options);
-      return;
-    }
-  } catch (error) {
-    console.warn("Service worker notification failed:", error);
-  }
-
-  try {
-    new Notification(title, options);
-  } catch (error) {
-    console.warn("Notification failed:", error);
-  }
-}
-
-function showInAppAlertToast(title, body) {
-  if (document.visibilityState !== "visible") return;
-
-  let container = document.getElementById("agnihotra-toast-container");
-  if (!container) {
-    container = document.createElement("div");
-    container.id = "agnihotra-toast-container";
-    container.style.position = "fixed";
-    container.style.top = "16px";
-    container.style.right = "16px";
-    container.style.zIndex = "9999";
-    container.style.display = "flex";
-    container.style.flexDirection = "column";
-    container.style.gap = "10px";
-    container.style.maxWidth = "320px";
-    document.body.appendChild(container);
-  }
-
-  const toast = document.createElement("div");
-  toast.style.background = "rgba(20, 20, 20, 0.92)";
-  toast.style.color = "#fff";
-  toast.style.border = "1px solid rgba(255,255,255,0.16)";
-  toast.style.borderRadius = "12px";
-  toast.style.padding = "12px 14px";
-  toast.style.boxShadow = "0 8px 26px rgba(0,0,0,0.35)";
-  toast.style.fontFamily = "Montserrat, sans-serif";
-  toast.style.transform = "translateY(-8px)";
-  toast.style.opacity = "0";
-  toast.style.transition = "all 220ms ease";
-  toast.innerHTML = `<div style="font-weight:700; font-size:0.95rem; margin-bottom:4px;">${title}</div><div style="font-size:0.85rem; opacity:0.92;">${body}</div>`;
-
-  container.appendChild(toast);
-  requestAnimationFrame(() => {
-    toast.style.transform = "translateY(0)";
-    toast.style.opacity = "1";
-  });
-
-  setTimeout(() => {
-    toast.style.opacity = "0";
-    toast.style.transform = "translateY(-8px)";
-    setTimeout(() => toast.remove(), 250);
-  }, 6500);
-}
 
 /**
  * DEBUG / TESTING FUNCTION
@@ -1123,48 +1349,16 @@ function setupScreenWakeLock() {
   }
 }
 
-function setupNotifications() {
-  // Initial attempt may be ignored by some browsers until user gesture.
-  requestNotificationPermission();
-  ["click", "touchstart", "mousedown", "keydown"].forEach((eventName) => {
-    window.addEventListener(
-      eventName,
-      () => {
-        requestNotificationPermission();
-      },
-      { once: false }
-    );
-  });
-}
-
-// Manual QA helper for notification testing from console.
-window.testNotification = async function() {
-  const granted = await requestNotificationPermission();
-  if (!granted) {
-    console.warn("Notification permission not granted.");
-    return false;
-  }
-
-  await showAgnihotraNotification(
-    "Agnihotra test notification",
-    "Notifications are working on this device/browser.",
-    "agnihotra-test-notification"
-  );
-  return true;
-};
-
-function displayCountdownAndTime(element, type, time) {
+function displayCountdownAndTime(element, id, label, time, isSunrise) {
   const itemDiv = document.createElement("div");
   itemDiv.className = "time-item";
 
-  // Create a unique ID by removing spaces and special characters
-  const uniqueId = type.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const isSunrise = type.toLowerCase().includes("sunrise");
+  const uniqueId = id;
   const iconClass = isSunrise ? "fas fa-sun" : "fas fa-moon";
   const iconColor = isSunrise ? "#FFD700" : "#4B0082";
 
   itemDiv.innerHTML = `
-        <span class="time-label"><i class="${iconClass}" style="color: ${iconColor};"></i> ${type.toUpperCase()}</span>
+        <span class="time-label"><i class="${iconClass}" style="color: ${iconColor};"></i> ${label.toUpperCase()}</span>
         <span id="${uniqueId}Countdown" class="countdown-value">--h --m --s</span>
         <span class="time-secondary">at ${formatDateTimeToTimeOnly(time)}</span>
     `;
@@ -1173,6 +1367,7 @@ function displayCountdownAndTime(element, type, time) {
 
   // Store countdown data globally
   window.activeCountdowns[uniqueId] = time;
+  window.countdownLabels[uniqueId] = label;
 
   // Start the countdown immediately
   updateCountdown(uniqueId, time);
@@ -1212,13 +1407,14 @@ function updateCountdown(type, targetTime) {
 
   const preAlertKey = `${type}_${targetTime}_pre${PRE_ALERT_MINUTES}`;
   const mainAlertKey = `${type}_${targetTime}_main`;
+  const eventLabel = window.countdownLabels?.[type] || type;
 
   if (!window.playedAlerts.has(preAlertKey)) {
     const preAlertDelta = currentTime - preAlertTime;
     if (preAlertDelta >= 0 && preAlertDelta <= ALERT_WINDOW_MS) {
-      showAgnihotraNotification(
+      window.AgnihotraNotifications?.show(
         "Agnihotra in 15 minutes",
-        `${type.replace(/today's|tomorrow's/gi, "").trim()} starts in 15 minutes.`,
+        `${eventLabel} starts in 15 minutes.`,
         preAlertKey
       );
       window.playedAlerts.add(preAlertKey);
@@ -1230,9 +1426,9 @@ function updateCountdown(type, targetTime) {
   if (!window.playedAlerts.has(mainAlertKey)) {
     const mainAlertDelta = currentTime - targetTime;
     if (mainAlertDelta >= 0 && mainAlertDelta <= ALERT_WINDOW_MS) {
-      showAgnihotraNotification(
+      window.AgnihotraNotifications?.show(
         "Agnihotra time now",
-        `${type} is starting now.`,
+        `${eventLabel} is starting now.`,
         mainAlertKey
       );
       playBellTone(1, 0.32);
@@ -1276,35 +1472,111 @@ function formatDateTime(time) {
 }
 
 async function getLocation() {
-  const loadingSpinner = document.querySelector(".loading-spinner");
-  if (loadingSpinner) {
-    loadingSpinner.style.display = "block";
+  setLocationLoading(true);
+  const startedAt = performance.now();
+  debugLog("location:start");
+  locationLog("request-start");
+
+  // Immediate bootstrap for reload reliability: show last known location/timings first.
+  const lastKnown = getLastKnownLocation();
+  if (lastKnown) {
+    const fastLocationText =
+      lastKnown.locationName ||
+      `${lastKnown.lat.toFixed(6)}, ${lastKnown.lng.toFixed(6)}`;
+    document.getElementById("userLocation").innerText = `Your Location: ${fastLocationText}`;
+    debugLog("location:last-known-bootstrap", {
+      lat: lastKnown.lat,
+      lng: lastKnown.lng,
+      hasName: Boolean(lastKnown.locationName),
+    });
+    getSunriseSunset(lastKnown.lat, lastKnown.lng, lastKnown.locationName || null);
   }
 
   if (navigator.geolocation) {
+    let fallbackStarted = false;
+    const startFallback = async (reason) => {
+      if (fallbackStarted) return;
+      fallbackStarted = true;
+      locationLog("gps-fallback-started", { reason });
+      await getApproximateLocation();
+      // Continue trying for a precise GPS fix in background.
+      retryPreciseLocationInBackground(reason);
+    };
+
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const latitude = position.coords.latitude;
         const longitude = position.coords.longitude;
+        debugLog("location:geolocation-success", {
+          elapsedMs: Math.round(performance.now() - startedAt),
+          accuracyMeters: position.coords.accuracy
+        });
+        locationLog("gps-success", {
+          lat: latitude,
+          lng: longitude,
+          accuracyMeters: position.coords.accuracy,
+          elapsedMs: Math.round(performance.now() - startedAt)
+        });
 
         document.getElementById(
           "userLocation"
         ).innerText = `Your Location: Latitude ${latitude}, Longitude ${longitude}`;
-        await reverseGeocode(latitude, longitude);
+        saveLastKnownLocation(latitude, longitude);
+        // Prioritize timing visibility first; resolve readable address in parallel.
+        const timingsPromise = getSunriseSunset(latitude, longitude);
+        await reverseGeocode(latitude, longitude, true);
+        await timingsPromise;
       },
       async (error) => {
-        await showError(error);
+        debugLog("location:geolocation-error", {
+          elapsedMs: Math.round(performance.now() - startedAt),
+          code: error?.code,
+          message: error?.message
+        });
+        locationLog("gps-error-fallback-to-ip", {
+          code: error?.code,
+          message: error?.message,
+          elapsedMs: Math.round(performance.now() - startedAt)
+        });
+
+        // For timeout/unavailable GPS, attempt one immediate precise retry
+        // before moving to city-level IP fallback.
+        if (error?.code !== 1) {
+          const recovered = await tryImmediatePreciseLocationRecovery();
+          if (recovered) {
+            document.getElementById(
+              "userLocation"
+            ).innerText = `Your Location: Latitude ${recovered.latitude}, Longitude ${recovered.longitude}`;
+            saveLastKnownLocation(recovered.latitude, recovered.longitude);
+
+            const timingsPromise = getSunriseSunset(recovered.latitude, recovered.longitude);
+            await reverseGeocode(recovered.latitude, recovered.longitude, true);
+            await timingsPromise;
+            return;
+          }
+        }
+
+        await startFallback(`gps-error-${error?.code || "unknown"}`);
+      },
+      {
+        enableHighAccuracy: false,
+        timeout: 20000,
+        maximumAge: 300000
       }
     );
   } else {
+    debugLog("location:geolocation-not-supported");
+    locationLog("geolocation-not-supported-fallback-to-ip");
     document.getElementById("userLocation").innerText =
-      "Geolocation not supported. Getting approximate location...";
+      "Geolocation not supported. Getting location...";
     // Try to get approximate location using IP-based geolocation
     await getApproximateLocation();
   }
 }
 
-async function reverseGeocode(latitude, longitude) {
+async function reverseGeocode(latitude, longitude, skipTimingFetch = false) {
+  const startedAt = performance.now();
+  debugLog("reverse-geocode:start", { skipTimingFetch });
   try {
     // If offline, skip API calls and use cached data
     if (!navigator.onLine) {
@@ -1318,18 +1590,26 @@ async function reverseGeocode(latitude, longitude) {
         <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Offline Mode:</span>
         <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">${locationDisplay}</span>
       `;
-      await getSunriseSunset(latitude, longitude);
+      if (!skipTimingFetch) {
+        await getSunriseSunset(latitude, longitude);
+      }
+      setLocationLoading(false);
+      debugLog("reverse-geocode:offline-cache", {
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
+      locationLog("source-offline-cache", { lat: latitude, lng: longitude });
       return;
     }
 
     // Use Nominatim (OpenStreetMap) for more precise address details
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`,
       {
         headers: {
           "Accept-Language": "en",
         },
-      }
+      },
+      7000
     );
 
     if (response.ok) {
@@ -1343,12 +1623,21 @@ async function reverseGeocode(latitude, longitude) {
                 <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Detected Address:</span>
                 <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">${address}</span>
             `;
+      saveLastKnownLocation(latitude, longitude, address);
 
       // Call the async getSunriseSunset function and pass location name
-      await getSunriseSunset(latitude, longitude, address);
+      if (!skipTimingFetch) {
+        await getSunriseSunset(latitude, longitude, address);
+      }
+      debugLog("reverse-geocode:nominatim-success", {
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
+      locationLog("source-gps+nominatim", {
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
     } else {
       // Fallback to original BigDataCloud service if Nominatim fails
-      const bdcResponse = await fetch(
+      const bdcResponse = await fetchWithTimeout(
         `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
       );
       if (bdcResponse.ok) {
@@ -1361,7 +1650,16 @@ async function reverseGeocode(latitude, longitude) {
         document.getElementById(
           "userLocation"
         ).innerText = `Your Location: ${location}`;
-        await getSunriseSunset(latitude, longitude, location);
+        saveLastKnownLocation(latitude, longitude, location);
+        if (!skipTimingFetch) {
+          await getSunriseSunset(latitude, longitude, location);
+        }
+        debugLog("reverse-geocode:bdc-success", {
+          elapsedMs: Math.round(performance.now() - startedAt)
+        });
+        locationLog("source-gps+bigdatacloud", {
+          elapsedMs: Math.round(performance.now() - startedAt)
+        });
       } else {
         throw new Error("All geocoding services failed");
       }
@@ -1373,34 +1671,51 @@ async function reverseGeocode(latitude, longitude) {
     ).innerText = `Your Location: ${latitude.toFixed(6)}, ${longitude.toFixed(
       6
     )}`;
-    await getSunriseSunset(latitude, longitude);
+    if (!skipTimingFetch) {
+      await getSunriseSunset(latitude, longitude);
+    }
+    debugLog("reverse-geocode:fallback-coordinates", {
+      elapsedMs: Math.round(performance.now() - startedAt),
+      error: error?.message || String(error)
+    });
+    locationLog("source-gps-coordinates-fallback", {
+      error: error?.message || String(error)
+    });
   }
 
-  // Hide loading spinner
-  const loadingSpinner = document.querySelector(".loading-spinner");
-  if (loadingSpinner) {
-    loadingSpinner.style.display = "none";
-  }
+  setLocationLoading(false);
 }
 
-async function reverseGeocodeApproximate(latitude, longitude) {
+async function reverseGeocodeApproximate(latitude, longitude, skipTimingFetch = false) {
+  const startedAt = performance.now();
+  debugLog("reverse-geocode-approx:start", { skipTimingFetch });
   try {
     // If offline, skip API call
     if (!navigator.onLine) {
       const cache = getValidCachedData(latitude, longitude);
       const locationDisplay = cache && cache.locationName 
-        ? `${cache.locationName} (approximate)` 
-        : `${latitude.toFixed(2)}, ${longitude.toFixed(2)} (approximate)`;
+        ? `${cache.locationName}` 
+        : `${latitude.toFixed(2)}, ${longitude.toFixed(2)}`;
       
       document.getElementById(
         "userLocation"
       ).innerText = `Offline Mode: ${locationDisplay}`;
-      await getSunriseSunset(latitude, longitude);
+      if (!skipTimingFetch) {
+        await getSunriseSunset(latitude, longitude);
+      }
+      setLocationLoading(false);
+      debugLog("reverse-geocode-approx:offline-cache", {
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
+      locationLog("source-ip-offline-cache", {
+        lat: latitude,
+        lng: longitude
+      });
       return;
     }
 
     // Use the same reverse geocoding service but mark as approximate
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
     );
 
@@ -1412,18 +1727,36 @@ async function reverseGeocodeApproximate(latitude, longitude) {
 
       document.getElementById(
         "userLocation"
-      ).innerText = `Your Location: ${location} (approximate)`;
+      ).innerText = `Your Location: ${location}`;
+      saveLastKnownLocation(latitude, longitude, location);
 
       // Call the async getSunriseSunset function with approximate coordinates and location name
-      await getSunriseSunset(latitude, longitude, location);
+      if (!skipTimingFetch) {
+        await getSunriseSunset(latitude, longitude, location);
+      }
+      debugLog("reverse-geocode-approx:bdc-success", {
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
+      locationLog("source-ip+bigdatacloud", {
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
     } else {
       // Fall back to coordinates display
       document.getElementById(
         "userLocation"
       ).innerText = `Your Location: ${latitude.toFixed(2)}, ${longitude.toFixed(
         2
-      )} (approximate)`;
-      await getSunriseSunset(latitude, longitude);
+      )}`;
+      saveLastKnownLocation(latitude, longitude);
+      if (!skipTimingFetch) {
+        await getSunriseSunset(latitude, longitude);
+      }
+      debugLog("reverse-geocode-approx:coordinates-only", {
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
+      locationLog("source-ip-coordinates-only", {
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
     }
   } catch (error) {
     // Fall back to coordinates display but continue with sunrise/sunset
@@ -1431,18 +1764,26 @@ async function reverseGeocodeApproximate(latitude, longitude) {
       "userLocation"
     ).innerText = `Your Location: ${latitude.toFixed(2)}, ${longitude.toFixed(
       2
-    )} (approximate)`;
-    await getSunriseSunset(latitude, longitude);
+    )}`;
+    saveLastKnownLocation(latitude, longitude);
+    if (!skipTimingFetch) {
+      await getSunriseSunset(latitude, longitude);
+    }
+    debugLog("reverse-geocode-approx:fallback-coordinates", {
+      elapsedMs: Math.round(performance.now() - startedAt),
+      error: error?.message || String(error)
+    });
+    locationLog("source-ip-fallback-error", {
+      error: error?.message || String(error)
+    });
   }
 
-  // Hide loading spinner
-  const loadingSpinner = document.querySelector(".loading-spinner");
-  if (loadingSpinner) {
-    loadingSpinner.style.display = "none";
-  }
+  setLocationLoading(false);
 }
 
 async function getApproximateLocation() {
+  const startedAt = performance.now();
+  debugLog("approx-location:start");
   try {
     // If offline, show message and use default location or cached data
     if (!navigator.onLine) {
@@ -1450,11 +1791,10 @@ async function getApproximateLocation() {
         "userLocation"
       ).innerText = `Offline Mode - Unable to detect location automatically. Showing cached timings if available.`;
       
-      // Hide loading spinner
-      const loadingSpinner = document.querySelector(".loading-spinner");
-      if (loadingSpinner) {
-        loadingSpinner.style.display = "none";
-      }
+      setLocationLoading(false);
+      debugLog("approx-location:offline", {
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
       return;
     }
 
@@ -1471,7 +1811,7 @@ async function getApproximateLocation() {
 
     for (const service of services) {
       try {
-        const response = await fetch(service);
+        const response = await fetchWithTimeout(service, {}, 3500);
 
         if (response.ok) {
           const data = await response.json();
@@ -1483,6 +1823,7 @@ async function getApproximateLocation() {
               lat: parseFloat(data.latitude),
               lng: parseFloat(data.longitude),
             };
+            locationLog("ip-service-selected", { service });
             break;
           } else if (data.lat && data.lon) {
             // Alternative lat/lon format
@@ -1490,6 +1831,7 @@ async function getApproximateLocation() {
               lat: parseFloat(data.lat),
               lng: parseFloat(data.lon),
             };
+            locationLog("ip-service-selected", { service });
             break;
           }
         }
@@ -1507,7 +1849,12 @@ async function getApproximateLocation() {
       )}, ${coordinates.lng.toFixed(2)})`;
 
       // Use the same reverse geocoding function to identify the place
-      await reverseGeocodeApproximate(coordinates.lat, coordinates.lng);
+      const timingsPromise = getSunriseSunset(coordinates.lat, coordinates.lng);
+      await reverseGeocodeApproximate(coordinates.lat, coordinates.lng, true);
+      await timingsPromise;
+      debugLog("approx-location:success", {
+        elapsedMs: Math.round(performance.now() - startedAt)
+      });
     } else {
       throw new Error(
         "All IP geolocation services failed to provide coordinates"
@@ -1527,18 +1874,18 @@ async function getApproximateLocation() {
         "<li>Location access required for accurate Agnihotra timing</li>";
     }
 
-    // Hide loading spinner
-    const loadingSpinner = document.querySelector(".loading-spinner");
-    if (loadingSpinner) {
-      loadingSpinner.style.display = "none";
-    }
+    setLocationLoading(false);
+    debugLog("approx-location:error", {
+      elapsedMs: Math.round(performance.now() - startedAt),
+      error: error?.message || String(error)
+    });
   }
 }
 
 async function showError(error) {
   document.getElementById(
     "userLocation"
-  ).innerText = `Getting approximate location...`;
+  ).innerText = `Getting location...`;
 
   // Try to get approximate location using IP-based geolocation
   await getApproximateLocation();
@@ -1559,10 +1906,17 @@ async function showError(error) {
   }
 
 window.onload = () => {
+  debugLog("app:onload");
+  setLocationLoading(true);
+  setupLanguageToggle();
   setupScreenWakeLock();
-  setupNotifications();
+  window.AgnihotraNotifications?.setup();
   getLocation();
   updateOnlineStatus();
+  loadTranslations().then(() => {
+    applyTranslations();
+    refreshUpcomingEvents();
+  });
 };
 
 // Register Service Worker immediately for offline support

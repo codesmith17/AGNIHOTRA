@@ -1,8 +1,12 @@
-const CACHE_NAME = 'agnihotra-cache-v14';
+const CACHE_NAME = 'agnihotra-cache-v19';
 
 // Critical assets to cache on install
 const CRITICAL_ASSETS = [
+  '/',
   '/index.html',
+  '/translations.json',
+  '/notifications.js',
+  '/timings-engine.js',
   '/script.js',
   '/style.css',
   '/assets/images/app-icon.png'
@@ -24,6 +28,51 @@ const CACHEABLE_RESOURCES = [
   '/assets/images/agnihotra-timing-reference.jpg',
   '/assets/video/fire-background.mp4'
 ];
+
+function buildOfflineRecoveryPage() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EternalAgni Recovery</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #0f0f12; color: #fff; display: grid; place-items: center; min-height: 100vh; }
+    .card { width: min(92vw, 520px); background: #18181d; border: 1px solid #2a2a33; border-radius: 14px; padding: 24px; box-shadow: 0 16px 40px rgba(0,0,0,0.35); }
+    h1 { margin: 0 0 10px; font-size: 1.4rem; }
+    p { margin: 0 0 16px; opacity: 0.9; line-height: 1.45; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; }
+    button { border: 0; border-radius: 9px; padding: 10px 14px; font-weight: 600; cursor: pointer; }
+    #fix { background: #ff7f32; color: #111; }
+    #reload { background: #2a2a33; color: #fff; border: 1px solid #3a3a45; }
+    small { display: block; margin-top: 14px; opacity: 0.7; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>App Recovery Needed</h1>
+    <p>The app could not load required files. Use <b>Fix App</b> once to clear old cache/service worker and reload.</p>
+    <div class="row">
+      <button id="fix">Fix App</button>
+      <button id="reload">Reload</button>
+    </div>
+    <small>If internet is unstable, try again after a few seconds.</small>
+  </div>
+  <script>
+    document.getElementById('reload').onclick = () => location.reload();
+    document.getElementById('fix').onclick = async () => {
+      try {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      } catch (_) {}
+      location.reload();
+    };
+  </script>
+</body>
+</html>`;
+}
 
 // Install event - only cache critical assets
 self.addEventListener('install', (event) => {
@@ -81,6 +130,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   const url = new URL(event.request.url);
+  const isSameOrigin = url.origin === self.location.origin;
   const isAudioRequest =
     event.request.destination === 'audio' ||
     url.pathname.endsWith('.mp3') ||
@@ -101,6 +151,45 @@ self.addEventListener('fetch', (event) => {
           headers: { 'Content-Type': 'application/json' }
         });
       })
+    );
+    return;
+  }
+
+  // Browsers may request /favicon.ico even with explicit icon links.
+  // Return app icon fallback instead of surfacing a 503 error.
+  if (isSameOrigin && url.pathname === '/favicon.ico') {
+    event.respondWith(
+      fetch(event.request).catch(() =>
+        caches.match('/assets/images/app-icon.png').then((iconResponse) => {
+          return (
+            iconResponse ||
+            new Response(null, {
+              status: 204,
+              statusText: 'No Content'
+            })
+          );
+        })
+      )
+    );
+    return;
+  }
+
+  // For document navigations, prefer network but always fall back to app shell.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() =>
+        Promise.all([caches.match('/index.html'), caches.match('/')]).then(([cachedIndex, cachedRoot]) => {
+          return (
+            cachedIndex ||
+            cachedRoot ||
+            new Response(buildOfflineRecoveryPage(), {
+              status: 200,
+              statusText: 'OK',
+              headers: { 'Content-Type': 'text/html; charset=utf-8' }
+            })
+          );
+        })
+      )
     );
     return;
   }
