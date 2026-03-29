@@ -1,4 +1,4 @@
-const CACHE_NAME = 'agnihotra-cache-v12';
+const CACHE_NAME = 'agnihotra-cache-v14';
 
 // Critical assets to cache on install
 const CRITICAL_ASSETS = [
@@ -21,7 +21,8 @@ const CACHEABLE_RESOURCES = [
   '/assets/images/cow-dung-cakes.webp',
   '/assets/images/cow-ghee.jpg',
   '/assets/images/unpolished-rice-grains.jpg',
-  '/assets/images/agnihotra-timing-reference.jpg'
+  '/assets/images/agnihotra-timing-reference.jpg',
+  '/assets/video/fire-background.mp4'
 ];
 
 // Install event - only cache critical assets
@@ -124,7 +125,18 @@ self.addEventListener('fetch', (event) => {
 
           return networkResponse;
         })
-        .catch(() => caches.match(event.request))
+        .catch(() =>
+          caches.match(event.request).then((cachedResponse) => {
+            // Always return a valid Response object for failed audio fetches.
+            return (
+              cachedResponse ||
+              new Response('', {
+                status: 503,
+                statusText: 'Service Unavailable',
+              })
+            );
+          })
+        )
     );
     return;
   }
@@ -180,7 +192,16 @@ self.addEventListener('fetch', (event) => {
             
             // For navigation requests (HTML pages), try to return cached index.html
             if (event.request.mode === 'navigate') {
-              return caches.match('/index.html');
+              return caches.match('/index.html').then((cachedIndex) => {
+                return (
+                  cachedIndex ||
+                  new Response('Offline - App shell not available', {
+                    status: 503,
+                    statusText: 'Service Unavailable',
+                    headers: { 'Content-Type': 'text/plain' },
+                  })
+                );
+              });
             }
             
             // For other resources, return a generic error response
@@ -190,6 +211,22 @@ self.addEventListener('fetch', (event) => {
             });
           });
       })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientsArr) => {
+      for (const client of clientsArr) {
+        if ('focus' in client) {
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow('/index.html');
+      }
+    })
   );
 });
 
