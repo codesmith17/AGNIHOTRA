@@ -1,6 +1,7 @@
 {
   "name": "EternalAgni - Agnihotra Timings",
   "short_name": "EternalAgni",
+  "id": "/",
   "description": "Precise sunrise and sunset timings for daily Agnihotra practice.",
   "start_url": "/",
   "scope": "/",
@@ -18,6 +19,14 @@
       "src": "/assets/images/app-icon.png",
       "sizes": "512x512",
       "type": "image/png"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/assets/screenshots/home-portrait.png",
+      "sizes": "752x796",
+      "type": "image/png",
+      "label": "EternalAgni home screen"
     }
   ]
 }
