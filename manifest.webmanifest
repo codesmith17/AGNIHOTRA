@@ -3,12 +3,28 @@
   "short_name": "EternalAgni",
   "id": "/",
   "description": "Precise sunrise and sunset timings for daily Agnihotra practice.",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "lifestyle",
+    "health",
+    "utilities"
+  ],
+  "iarc_rating_id": "",
   "start_url": "/",
   "scope": "/",
+  "scope_extensions": [],
+  "display_override": [
+    "standalone",
+    "minimal-ui",
+    "browser"
+  ],
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0f0f12",
   "theme_color": "#ff7f32",
+  "prefer_related_applications": false,
+  "related_applications": [],
   "icons": [
     {
       "src": "/assets/images/app-icon-192.png",
@@ -23,9 +39,17 @@
   ],
   "screenshots": [
     {
+      "src": "/assets/screenshots/home-desktop.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "EternalAgni desktop experience"
+    },
+    {
       "src": "/assets/screenshots/home-portrait.png",
       "sizes": "752x796",
       "type": "image/png",
+      "form_factor": "narrow",
       "label": "EternalAgni home screen"
     }
   ]
