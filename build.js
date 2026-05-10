@@ -21,6 +21,7 @@ const filesToCopy = [
     'assets/images/eternalagni-icon.png',
     'assets/images/app-icon-192.png',
     'assets/images/app-icon.png',
+    'assets/screenshots/home-portrait.png',
     'assets/audio/mantras/sunrise-mantra.mpeg',
     'assets/audio/mantras/sunset-mantra.mpeg',
     'assets/audio/mantras/panchasheel-pratidnya.mpeg',
