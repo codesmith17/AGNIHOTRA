@@ -11,6 +11,7 @@ if (!fs.existsSync(publicDir)) {
 // Files to copy to public directory
 const filesToCopy = [
     'index.html',
+    'manifest.webmanifest',
     'translations.json',
     'notifications.js',
     'timings-engine.js',
@@ -18,6 +19,7 @@ const filesToCopy = [
     'style.css',
     'style.css.map',
     'assets/images/eternalagni-icon.png',
+    'assets/images/app-icon-192.png',
     'assets/images/app-icon.png',
     'assets/audio/mantras/sunrise-mantra.mpeg',
     'assets/audio/mantras/sunset-mantra.mpeg',
