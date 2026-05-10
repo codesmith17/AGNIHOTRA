@@ -10,10 +10,19 @@
     "health",
     "utilities"
   ],
-  "iarc_rating_id": "",
+  "iarc_rating_id": "pending-certification",
   "start_url": "/",
   "scope": "/",
-  "scope_extensions": [],
+  "scope_extensions": [
+    {
+      "type": "origin",
+      "origin": "https://auth.agnihotra-eternal-agni.vercel.app"
+    },
+    {
+      "type": "origin",
+      "origin": "https://en.agnihotra-eternal-agni.vercel.app"
+    }
+  ],
   "display_override": [
     "standalone",
     "minimal-ui",
@@ -24,7 +33,12 @@
   "background_color": "#0f0f12",
   "theme_color": "#ff7f32",
   "prefer_related_applications": false,
-  "related_applications": [],
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "https://agnihotra-eternal-agni.vercel.app/manifest.webmanifest"
+    }
+  ],
   "icons": [
     {
       "src": "/assets/images/app-icon-192.png",
