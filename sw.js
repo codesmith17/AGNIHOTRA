@@ -1,14 +1,16 @@
-const CACHE_NAME = 'agnihotra-cache-v21';
+const CACHE_NAME = 'agnihotra-cache-v22';
 
 // Critical assets to cache on install
 const CRITICAL_ASSETS = [
   '/',
   '/index.html',
+  '/manifest.webmanifest',
   '/translations.json',
   '/notifications.js',
   '/timings-engine.js',
   '/script.js',
   '/style.css',
+  '/assets/images/app-icon-192.png',
   '/assets/images/app-icon.png'
 ];
 
