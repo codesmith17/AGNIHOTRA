@@ -335,7 +335,12 @@ const CACHE_EXPIRY_MS = 6 * 30 * 24 * 60 * 60 * 1000; // 6 months in millisecond
 const TRANSLATION_STORAGE_KEY = "agnihotra_language";
 const DEBUG_STORAGE_KEY = "agnihotra_debug";
 const LAST_KNOWN_LOCATION_KEY = "agnihotra_last_known_location";
+const REQUIRE_MANDATORY_LOCATION_PERMISSION = true;
+const REQUIRE_MANDATORY_NOTIFICATION_PERMISSION = true;
 let translations = {};
+let latestTimingsForNativeReminders = null;
+let agnihotraMainInitStarted = false;
+let permissionGateBound = false;
 
 function getStoredLanguagePreference() {
   const saved = localStorage.getItem(TRANSLATION_STORAGE_KEY);
@@ -344,8 +349,37 @@ function getStoredLanguagePreference() {
 
 let currentLanguage = getStoredLanguagePreference();
 
+function isNativeAppRuntime() {
+  return Boolean(
+    window.Capacitor?.isNativePlatform && window.Capacitor.isNativePlatform()
+  );
+}
+
+function getRuntimeBoolean(...values) {
+  for (const value of values) {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (["false", "0", "off", "no"].includes(normalized)) return false;
+      if (["true", "1", "on", "yes"].includes(normalized)) return true;
+    }
+  }
+  return false;
+}
+
 function isDebugEnabled() {
   return localStorage.getItem(DEBUG_STORAGE_KEY) === "1";
+}
+
+function serializeForConsole(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return `${value.name}: ${value.message}`;
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return String(value);
+  }
 }
 
 function debugLog(stage, payload = null) {
@@ -353,7 +387,7 @@ function debugLog(stage, payload = null) {
   if (payload === null) {
     console.log(`[AGNIHOTRA][${stage}]`);
   } else {
-    console.log(`[AGNIHOTRA][${stage}]`, payload);
+    console.log(`[AGNIHOTRA][${stage}] ${serializeForConsole(payload)}`);
   }
 }
 
@@ -361,13 +395,313 @@ function locationLog(stage, payload = null) {
   if (payload === null) {
     console.info(`[AGNIHOTRA][LOCATION] ${stage}`);
   } else {
-    console.info(`[AGNIHOTRA][LOCATION] ${stage}`, payload);
+    console.info(`[AGNIHOTRA][LOCATION] ${stage} ${serializeForConsole(payload)}`);
   }
   window.__agnihotraLastLocationMeta = {
     stage,
     payload,
     at: new Date().toISOString()
   };
+}
+
+const DEBUG_OVERLAY_MAX_LINES = 120;
+let debugOverlayInitialized = false;
+
+function stringifyDebugValue(value) {
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return `${value.name}: ${value.message}`;
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return String(value);
+  }
+}
+
+function ensureDebugOverlayContainer() {
+  if (typeof document === "undefined" || !document.body) return null;
+  let panel = document.getElementById("agnihotra-debug-overlay");
+  if (panel) return panel;
+  panel = document.createElement("div");
+  panel.id = "agnihotra-debug-overlay";
+  panel.className = "agnihotra-debug-overlay";
+  panel.innerHTML = `
+    <div class="agnihotra-debug-header">
+      <span>Debug logs</span>
+      <button id="agnihotra-debug-clear" type="button">Clear</button>
+    </div>
+    <div id="agnihotra-debug-lines" class="agnihotra-debug-lines"></div>
+  `;
+  document.body.appendChild(panel);
+  const clearButton = document.getElementById("agnihotra-debug-clear");
+  clearButton?.addEventListener("click", () => {
+    const linesNode = document.getElementById("agnihotra-debug-lines");
+    if (linesNode) linesNode.innerHTML = "";
+  });
+  return panel;
+}
+
+function pushDebugOverlayLine(level, args) {
+  const message = args.map(stringifyDebugValue).join(" ");
+  if (!message.includes("[AGNIHOTRA]")) return;
+  const panel = ensureDebugOverlayContainer();
+  if (!panel) return;
+  const linesNode = document.getElementById("agnihotra-debug-lines");
+  if (!linesNode) return;
+
+  const line = document.createElement("div");
+  line.className = `agnihotra-debug-line ${level}`;
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  const ss = String(now.getSeconds()).padStart(2, "0");
+  line.textContent = `${hh}:${mm}:${ss} ${message}`;
+  linesNode.appendChild(line);
+
+  while (linesNode.childElementCount > DEBUG_OVERLAY_MAX_LINES) {
+    linesNode.removeChild(linesNode.firstChild);
+  }
+  linesNode.scrollTop = linesNode.scrollHeight;
+}
+
+function setupDebugOverlayLogger() {
+  const enabled = getRuntimeBoolean(
+    window.AGNI_RUNTIME_CONFIG?.enableDebugOverlay,
+    window.AGNI_ENABLE_DEBUG_OVERLAY,
+    window.AGNI_RUNTIME_CONFIG?.enableTestReminder,
+    window.AGNI_ENABLE_TEST_REMINDER
+  );
+  if (!enabled) {
+    const existing = document.getElementById("agnihotra-debug-overlay");
+    if (existing) existing.remove();
+    return;
+  }
+  if (debugOverlayInitialized) return;
+  debugOverlayInitialized = true;
+  ensureDebugOverlayContainer();
+  ["log", "info", "warn", "error"].forEach((methodName) => {
+    const original = console[methodName];
+    if (typeof original !== "function") return;
+    console[methodName] = (...args) => {
+      original.apply(console, args);
+      try {
+        pushDebugOverlayLine(methodName, args);
+      } catch (_) {}
+    };
+  });
+}
+
+function getMandatoryPermissionGate() {
+  if (typeof document === "undefined" || !document.body) return null;
+  let gate = document.getElementById("permission-gate");
+  if (!gate) {
+    gate = document.createElement("div");
+    gate.id = "permission-gate";
+    gate.className = "permission-gate hidden";
+    gate.innerHTML = `
+      <div class="permission-gate-card">
+        <h3 class="permission-gate-title">Permissions required</h3>
+        <p id="permission-gate-message" class="permission-gate-message">
+          Location and notification permissions are required for Agnihotra reminders.
+        </p>
+        <div class="permission-gate-actions">
+          <button id="permission-location-btn" type="button">Grant location</button>
+          <button id="permission-notification-btn" type="button">Grant notifications</button>
+          <button id="permission-settings-btn" type="button" class="secondary">Open app settings</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(gate);
+  }
+  return gate;
+}
+
+function setPermissionGateVisible(visible, message = "") {
+  const gate = getMandatoryPermissionGate();
+  if (!gate) return;
+  gate.classList.toggle("hidden", !visible);
+  const messageElement = document.getElementById("permission-gate-message");
+  if (messageElement && message) {
+    messageElement.innerText = message;
+  }
+}
+
+function isPermissionGateVisible() {
+  const gate = document.getElementById("permission-gate");
+  return Boolean(gate && !gate.classList.contains("hidden"));
+}
+
+async function getLocationPermissionState() {
+  if (!navigator.geolocation) return "unavailable";
+  if (!navigator.permissions?.query) return "prompt";
+  try {
+    const result = await navigator.permissions.query({ name: "geolocation" });
+    return result?.state || "prompt";
+  } catch (_) {
+    return "prompt";
+  }
+}
+
+async function requestMandatoryLocationPermission() {
+  if (!navigator.geolocation) return false;
+  try {
+    const position = await getCurrentPositionAsync({
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0,
+    });
+    if (position?.coords) {
+      saveLastKnownLocation(position.coords.latitude, position.coords.longitude);
+    }
+    return true;
+  } catch (error) {
+    locationLog("mandatory-location-request-failed", {
+      code: error?.code,
+      message: error?.message,
+    });
+    return false;
+  }
+}
+
+async function openNativeAppSettings() {
+  const appPlugin = window.Capacitor?.Plugins?.App;
+  if (!appPlugin || typeof appPlugin.openSettings !== "function") return false;
+  try {
+    await appPlugin.openSettings();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function evaluateMandatoryPermissions({ forcePrompt = false } = {}) {
+  let locationGranted = !REQUIRE_MANDATORY_LOCATION_PERMISSION;
+  let notificationGranted = !REQUIRE_MANDATORY_NOTIFICATION_PERMISSION;
+  let locationState = "unknown";
+  let notificationState = "unknown";
+
+  if (REQUIRE_MANDATORY_NOTIFICATION_PERMISSION) {
+    notificationState =
+      (await window.AgnihotraNotifications?.getPermissionStatus?.()) || "unknown";
+    if (forcePrompt) {
+      notificationGranted = Boolean(
+        await window.AgnihotraNotifications?.requestPermission({ force: true })
+      );
+      notificationState =
+        (await window.AgnihotraNotifications?.getPermissionStatus?.()) || notificationState;
+    } else {
+      if (notificationState === "granted") {
+        notificationGranted = true;
+      } else {
+        notificationGranted = Boolean(
+          await window.AgnihotraNotifications?.ensurePermissionBootstrap?.()
+        );
+        notificationState =
+          (await window.AgnihotraNotifications?.getPermissionStatus?.()) || notificationState;
+      }
+    }
+  }
+
+  if (REQUIRE_MANDATORY_LOCATION_PERMISSION) {
+    locationState = await getLocationPermissionState();
+    locationLog("mandatory-location-state", { state: locationState, forcePrompt });
+    if (locationState === "granted" && !forcePrompt) {
+      locationGranted = true;
+    } else {
+      locationGranted = await requestMandatoryLocationPermission();
+      locationState = await getLocationPermissionState();
+    }
+  }
+
+  const allGranted = locationGranted && notificationGranted;
+  if (allGranted) {
+    setPermissionGateVisible(false);
+    return true;
+  }
+
+  const blocked = [];
+  if (!locationGranted) blocked.push("location");
+  if (!notificationGranted) blocked.push("notifications");
+  const denied = [];
+  if (!locationGranted && locationState === "denied") denied.push("location");
+  if (!notificationGranted && notificationState === "denied") denied.push("notifications");
+  const gateMessage =
+    denied.length > 0
+      ? `Permission denied for ${denied.join(
+          " and "
+        )}. Tap Open app settings, allow permission, then return here.`
+      : `Please grant ${blocked.join(" and ")} permission${
+          blocked.length > 1 ? "s" : ""
+        } to continue.`;
+  setLocationLoading(false);
+  setPermissionGateVisible(true, gateMessage);
+  return false;
+}
+
+async function continueAppInitialization() {
+  if (agnihotraMainInitStarted) return;
+  agnihotraMainInitStarted = true;
+  window.AgnihotraNotifications?.setup();
+  getLocation();
+  updateOnlineStatus();
+  loadTranslations().then(() => {
+    applyTranslations();
+    refreshUpcomingEvents();
+  });
+}
+
+function bindPermissionGateActions() {
+  if (permissionGateBound) return;
+  permissionGateBound = true;
+  const gate = getMandatoryPermissionGate();
+  if (!gate) return;
+
+  const locationBtn = document.getElementById("permission-location-btn");
+  const notificationBtn = document.getElementById("permission-notification-btn");
+  const settingsBtn = document.getElementById("permission-settings-btn");
+
+  locationBtn?.addEventListener("click", async () => {
+    const granted = await evaluateMandatoryPermissions({ forcePrompt: true });
+    if (granted) {
+      continueAppInitialization();
+    }
+  });
+
+  notificationBtn?.addEventListener("click", async () => {
+    const granted = await evaluateMandatoryPermissions({ forcePrompt: true });
+    if (granted) {
+      continueAppInitialization();
+    }
+  });
+
+  settingsBtn?.addEventListener("click", async () => {
+    const opened = await openNativeAppSettings();
+    if (!opened) {
+      alert("Please open app settings manually and allow location + notifications.");
+    }
+    const granted = await evaluateMandatoryPermissions({ forcePrompt: false });
+    if (granted) {
+      continueAppInitialization();
+    }
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && isPermissionGateVisible()) {
+      evaluateMandatoryPermissions({ forcePrompt: false }).then((granted) => {
+        if (granted) continueAppInitialization();
+      });
+    }
+  });
+
+  const appPlugin = window.Capacitor?.Plugins?.App;
+  if (appPlugin?.addListener) {
+    appPlugin.addListener("appStateChange", ({ isActive }) => {
+      if (isActive && isPermissionGateVisible()) {
+        evaluateMandatoryPermissions({ forcePrompt: false }).then((granted) => {
+          if (granted) continueAppInitialization();
+        });
+      }
+    });
+  }
 }
 
 window.enableAgnihotraDebug = function() {
@@ -501,6 +835,242 @@ function t(key, fallback = "") {
   return translations?.[currentLanguage]?.[key] || fallback;
 }
 
+function interpolateTemplate(template, values = {}) {
+  return String(template || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
+    return values[key] !== undefined ? String(values[key]) : "";
+  });
+}
+
+function getReminderNotificationCopy(eventLabel, minutes) {
+  const titleTemplate = t(
+    "notifications.reminderTitle",
+    "Agnihotra reminder"
+  );
+  const bodyTemplate = t(
+    "notifications.reminderBody",
+    "{{event}} starts in {{minutes}} minutes."
+  );
+  return {
+    title: interpolateTemplate(titleTemplate, { event: eventLabel, minutes }),
+    body: interpolateTemplate(bodyTemplate, { event: eventLabel, minutes }),
+  };
+}
+
+function getTestReminderNotificationCopy(seconds = 30) {
+  const titleTemplate = t("notifications.testTitle", "Agnihotra test reminder");
+  const bodyTemplate = t(
+    "notifications.testBody",
+    "Test reminder starts in {{seconds}} seconds."
+  );
+  return {
+    title: interpolateTemplate(titleTemplate, { seconds }),
+    body: interpolateTemplate(bodyTemplate, { seconds }),
+  };
+}
+
+function getNowNotificationCopy(eventLabel) {
+  const titleTemplate = t("notifications.nowTitle", "Agnihotra time now");
+  const bodyTemplate = t(
+    "notifications.nowBody",
+    "{{event}} is starting now."
+  );
+  return {
+    title: interpolateTemplate(titleTemplate, { event: eventLabel }),
+    body: interpolateTemplate(bodyTemplate, { event: eventLabel }),
+  };
+}
+
+function buildNativeReminderEventsFromTimings(timings, daysAhead = 14) {
+  if (!timings || typeof timings !== "object") return [];
+  const now = Date.now();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const endDate = new Date(todayStart);
+  endDate.setDate(endDate.getDate() + daysAhead);
+
+  const events = [];
+  Object.entries(timings).forEach(([dateStr, dayData]) => {
+    if (!dayData?.sunrise || !dayData?.sunset) return;
+
+    let day;
+    let month;
+    let year;
+    if (dateStr.includes(".")) {
+      const parts = dateStr.split(".");
+      if (parts.length !== 3) return;
+      day = Number(parts[0]);
+      month = Number(parts[1]);
+      year = Number(parts[2]);
+    } else if (dateStr.includes("-")) {
+      const parts = dateStr.split("-");
+      if (parts.length !== 3) return;
+      year = Number(parts[0]);
+      month = Number(parts[1]);
+      day = Number(parts[2]);
+    } else {
+      return;
+    }
+    if (!day || !month || !year) return;
+
+    const rowDate = new Date(year, month - 1, day);
+    if (rowDate < todayStart || rowDate > endDate) return;
+
+    const sunriseTs = parseDateTime(dateStr, dayData.sunrise);
+    const sunsetTs = parseDateTime(dateStr, dayData.sunset);
+
+    if (sunriseTs > now + 30000) {
+      const sunriseLabel = `${t("timeLabels.sunrise", "Sunrise")} • ${dateStr}`;
+      const sunriseCopy = getReminderNotificationCopy(
+        sunriseLabel,
+        PRE_ALERT_MINUTES
+      );
+      events.push({
+        id: `${dateStr}-sunrise`,
+        label: sunriseLabel,
+        time: sunriseTs,
+        reminderTitle: sunriseCopy.title,
+        reminderBody: sunriseCopy.body,
+      });
+    }
+
+    if (sunsetTs > now + 30000) {
+      const sunsetLabel = `${t("timeLabels.sunset", "Sunset")} • ${dateStr}`;
+      const sunsetCopy = getReminderNotificationCopy(
+        sunsetLabel,
+        PRE_ALERT_MINUTES
+      );
+      events.push({
+        id: `${dateStr}-sunset`,
+        label: sunsetLabel,
+        time: sunsetTs,
+        reminderTitle: sunsetCopy.title,
+        reminderBody: sunsetCopy.body,
+      });
+    }
+  });
+
+  return events.sort((a, b) => a.time - b.time);
+}
+
+function scheduleNativeRemindersFromTimings(timings, options = {}) {
+  latestTimingsForNativeReminders = timings || latestTimingsForNativeReminders;
+  const events = buildNativeReminderEventsFromTimings(
+    latestTimingsForNativeReminders,
+    14
+  );
+  if (events.length === 0) return;
+  window.AgnihotraNotifications?.scheduleUpcomingReminders(events, {
+    leadMinutes: PRE_ALERT_MINUTES,
+    replaceExisting: options.replaceExisting !== false,
+  });
+}
+
+function setTestReminderStatus(message) {
+  const status = document.getElementById("testReminderStatus");
+  if (status) status.textContent = message || "";
+}
+
+function getTestReminderSeconds() {
+  const configured =
+    Number(window.AGNI_RUNTIME_CONFIG?.testReminderSeconds) ||
+    Number(window.AGNI_TEST_REMINDER_SECONDS);
+  return Number.isFinite(configured) && configured >= 5
+    ? Math.round(configured)
+    : 20;
+}
+
+function isTestReminderEnabled() {
+  return getRuntimeBoolean(
+    window.AGNI_RUNTIME_CONFIG?.enableTestReminder,
+    window.AGNI_ENABLE_TEST_REMINDER
+  );
+}
+
+function updateTestReminderButtonCopy() {
+  const button = document.getElementById("testReminderBtn");
+  if (!button) return;
+  const seconds = getTestReminderSeconds();
+  const buttonTemplate = t(
+    "notifications.testButtonTemplate",
+    "Test reminder in {{seconds}}s"
+  );
+  button.textContent = interpolateTemplate(buttonTemplate, { seconds });
+}
+
+function clearTestReminderTimers() {
+  if (testReminderTimeoutId) {
+    clearTimeout(testReminderTimeoutId);
+    testReminderTimeoutId = null;
+  }
+  if (testReminderCountdownIntervalId) {
+    clearInterval(testReminderCountdownIntervalId);
+    testReminderCountdownIntervalId = null;
+  }
+}
+
+async function runQuickReminderTest() {
+  const isNative = isNativeAppRuntime();
+  const seconds = getTestReminderSeconds();
+  const reminderCopy = getTestReminderNotificationCopy(seconds);
+  const countdownTemplate = t(
+    "notifications.testCountdown",
+    "Test reminder in {{seconds}}s..."
+  );
+
+  const scheduled = await window.AgnihotraNotifications?.scheduleTestReminder?.({
+    delaySeconds: seconds,
+    title: reminderCopy.title,
+    body: reminderCopy.body,
+    tag: `agnihotra-test-reminder-${seconds}s`
+  });
+  console.log("[AGNIHOTRA][ALERT] test-reminder-schedule-result", {
+    scheduled: Boolean(scheduled),
+    isNative,
+    delaySeconds: seconds,
+  });
+
+  if (!scheduled) {
+    clearTestReminderTimers();
+    setTestReminderStatus("Unable to schedule test reminder.");
+    return;
+  }
+
+  clearTestReminderTimers();
+  let secondsLeft = seconds;
+  setTestReminderStatus(
+    interpolateTemplate(countdownTemplate, { seconds: secondsLeft })
+  );
+  testReminderCountdownIntervalId = setInterval(() => {
+    secondsLeft -= 1;
+    if (secondsLeft <= 0) {
+      if (testReminderCountdownIntervalId) {
+        clearInterval(testReminderCountdownIntervalId);
+        testReminderCountdownIntervalId = null;
+      }
+      return;
+    }
+    setTestReminderStatus(
+      interpolateTemplate(countdownTemplate, { seconds: secondsLeft })
+    );
+  }, 1000);
+
+  testReminderTimeoutId = setTimeout(() => {
+    if (isNative) {
+      console.log("[AGNIHOTRA][ALERT] test-reminder-trigger-native", {
+        mode: "notification-channel-sound-only",
+      });
+      setTestReminderStatus("Test notification triggered.");
+    } else {
+      playBellTone(3, 0.32, 450);
+      console.log("[AGNIHOTRA][ALERT] test-reminder-trigger-web", {
+        mode: "in-app-bell",
+      });
+      setTestReminderStatus("Test bell triggered.");
+    }
+    clearTestReminderTimers();
+  }, seconds * 1000);
+}
+
 function getNextLanguage(lang) {
   if (lang === "en") return "hi";
   if (lang === "hi") return "mr";
@@ -548,6 +1118,7 @@ function applyTranslations() {
   document.querySelectorAll(".lang-option").forEach((btn) => {
     btn.classList.toggle("active", btn.getAttribute("data-lang") === currentLanguage);
   });
+  updateTestReminderButtonCopy();
 }
 
 function setupLanguageToggle() {
@@ -562,6 +1133,7 @@ function setupLanguageToggle() {
     localStorage.setItem(TRANSLATION_STORAGE_KEY, currentLanguage);
     applyTranslations();
     refreshUpcomingEvents();
+    scheduleNativeRemindersFromTimings(latestTimingsForNativeReminders);
   };
 
   if (toggleButton) {
@@ -577,6 +1149,22 @@ function setupLanguageToggle() {
   });
 
   applyTranslations();
+}
+
+function setupTestReminderButton() {
+  const wrap = document.querySelector(".test-reminder-wrap");
+  const button = document.getElementById("testReminderBtn");
+  if (!button) return;
+  if (!isTestReminderEnabled()) {
+    if (wrap) wrap.style.display = "none";
+    return;
+  }
+  if (wrap) wrap.style.display = "";
+  updateTestReminderButtonCopy();
+  button.addEventListener("click", () => {
+    initAudio();
+    runQuickReminderTest();
+  });
 }
 
 function refreshUpcomingEvents() {
@@ -681,6 +1269,7 @@ function startBackgroundTimingGeneration(lat, lng, locationName, todayData, tomo
 
       saveTimingsToCache(generatedTimings, lat, lng, locationName);
       displayFullSchedule(generatedTimings);
+      scheduleNativeRemindersFromTimings(generatedTimings);
       setScheduleLoading(false);
       debugLog("background-3month:done", {
         jobId: myJobId,
@@ -728,6 +1317,7 @@ async function getSunriseSunset(lat, lng, locationName = null) {
       if (todayData && tomorrowData) {
         displayUpcomingTimings(todayData, tomorrowData, "upcomingTimes");
         displayFullSchedule(cache.timings);
+        scheduleNativeRemindersFromTimings(cache.timings);
         setLocationLoading(false);
         setScheduleLoading(false);
         debugLog("timings:cache-hit", {
@@ -757,6 +1347,13 @@ async function getSunriseSunset(lat, lng, locationName = null) {
     displaySunriseSunset(todayData, "todayTimes");
     displaySunriseSunset(tomorrowData, "tomorrowTimes");
     displayUpcomingTimings(todayData, tomorrowData, "upcomingTimes");
+    scheduleNativeRemindersFromTimings(
+      {
+        [todayData.date]: todayData,
+        [tomorrowData.date]: tomorrowData,
+      },
+      { replaceExisting: true }
+    );
     setLocationLoading(false);
     debugLog("timings:fast-path-ready", {
       elapsedMs: Math.round(performance.now() - startedAt)
@@ -949,6 +1546,13 @@ async function getSunriseSunsetFromSunAPI(
     displaySunriseSunset(todayData, "todayTimes");
     displaySunriseSunset(tomorrowData, "tomorrowTimes");
     displayUpcomingTimings(todayData, tomorrowData, "upcomingTimes");
+    scheduleNativeRemindersFromTimings(
+      {
+        [todayData.date]: todayData,
+        [tomorrowData.date]: tomorrowData,
+      },
+      { replaceExisting: true }
+    );
   } catch (error) {
     console.error("Error with sunrisesunset.io API:", error);
     setLocationLoading(false);
@@ -1133,6 +1737,7 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
       eventItem.isSunrise
     );
   });
+
 }
 
 // Helper function to parse date and time into timestamp
@@ -1212,7 +1817,7 @@ function parseDateTime(dateStr, timeStr) {
 window.activeCountdowns = window.activeCountdowns || {};
 window.countdownLabels = window.countdownLabels || {};
 window.playedAlerts = window.playedAlerts || new Set();
-const PRE_ALERT_MINUTES = 15;
+const PRE_ALERT_MINUTES = 10;
 const ALERT_WINDOW_MS = 10000; // Trigger if app checks within 10s of target
 
 // Persistent AudioContext to be initialized on user gesture
@@ -1220,6 +1825,9 @@ let audioCtx = null;
 let bellSound = null;
 let wakeLockSentinel = null;
 let wakeLockMonitorInterval = null;
+const activeBellPlayers = new Set();
+let testReminderTimeoutId = null;
+let testReminderCountdownIntervalId = null;
 
 // Function to initialize or resume AudioContext on user gesture
 function initAudio() {
@@ -1301,11 +1909,23 @@ function playBellTone(repeatCount = 1, volume = 0.35, gapMs = 450) {
       const currentBell = new Audio('assets/audio/alerts/agnihotra-bell.mp3');
       currentBell.volume = Math.max(0.05, Math.min(1, volume));
       currentBell.loop = false;
+      activeBellPlayers.add(currentBell);
+
+      const cleanupBell = () => {
+        activeBellPlayers.delete(currentBell);
+      };
+      currentBell.addEventListener('ended', cleanupBell, { once: true });
+      currentBell.addEventListener('pause', () => {
+        if (currentBell.ended || currentBell.currentTime === 0) {
+          cleanupBell();
+        }
+      });
 
       const playPromise = currentBell.play();
       if (playPromise !== undefined) {
         playPromise.catch((error) => {
           console.warn("Audio playback failed:", error);
+          cleanupBell();
         });
       }
 
@@ -1432,6 +2052,7 @@ function updateCountdown(type, targetTime) {
   const currentTime = Date.now();
   const timeDiff = targetTime - currentTime;
   const preAlertTime = targetTime - PRE_ALERT_MINUTES * 60 * 1000;
+  const nativeRuntime = isNativeAppRuntime();
 
   const countdownElement = document.getElementById(`${type}Countdown`);
 
@@ -1446,11 +2067,23 @@ function updateCountdown(type, targetTime) {
   if (!window.playedAlerts.has(preAlertKey)) {
     const preAlertDelta = currentTime - preAlertTime;
     if (preAlertDelta >= 0 && preAlertDelta <= ALERT_WINDOW_MS) {
-      window.AgnihotraNotifications?.show(
-        "Agnihotra in 15 minutes",
-        `${eventLabel} starts in 15 minutes.`,
-        preAlertKey
-      );
+      if (!nativeRuntime) {
+        const reminderCopy = getReminderNotificationCopy(
+          eventLabel,
+          PRE_ALERT_MINUTES
+        );
+        window.AgnihotraNotifications?.show(
+          reminderCopy.title,
+          reminderCopy.body,
+          preAlertKey
+        );
+        playBellTone(3, 0.32, 450);
+      } else {
+        console.log("[AGNIHOTRA][ALERT] pre-alert-native", {
+          tag: preAlertKey,
+          mode: "scheduled-notification-channel-sound-only",
+        });
+      }
       window.playedAlerts.add(preAlertKey);
     } else if (preAlertDelta > ALERT_WINDOW_MS) {
       window.playedAlerts.add(preAlertKey);
@@ -1460,12 +2093,24 @@ function updateCountdown(type, targetTime) {
   if (!window.playedAlerts.has(mainAlertKey)) {
     const mainAlertDelta = currentTime - targetTime;
     if (mainAlertDelta >= 0 && mainAlertDelta <= ALERT_WINDOW_MS) {
-      window.AgnihotraNotifications?.show(
-        "Agnihotra time now",
-        `${eventLabel} is starting now.`,
-        mainAlertKey
-      );
-      playBellTone(1, 0.32);
+      if (nativeRuntime) {
+        console.log("[AGNIHOTRA][ALERT] main-alert-native", {
+          tag: mainAlertKey,
+          mode: "scheduled-notification-channel-sound-only",
+        });
+      } else {
+        const nowCopy = getNowNotificationCopy(eventLabel);
+        window.AgnihotraNotifications?.show(
+          nowCopy.title,
+          nowCopy.body,
+          mainAlertKey
+        );
+        playBellTone(3, 0.32, 450);
+        console.log("[AGNIHOTRA][ALERT] main-alert-web", {
+          tag: mainAlertKey,
+          mode: "in-app-bell",
+        });
+      }
       window.playedAlerts.add(mainAlertKey);
     } else if (mainAlertDelta > ALERT_WINDOW_MS) {
       window.playedAlerts.add(mainAlertKey);
@@ -1527,16 +2172,6 @@ async function getLocation() {
   }
 
   if (navigator.geolocation) {
-    let fallbackStarted = false;
-    const startFallback = async (reason) => {
-      if (fallbackStarted) return;
-      fallbackStarted = true;
-      locationLog("gps-fallback-started", { reason });
-      await getApproximateLocation();
-      // Continue trying for a precise GPS fix in background.
-      retryPreciseLocationInBackground(reason);
-    };
-
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const latitude = position.coords.latitude;
@@ -1567,7 +2202,7 @@ async function getLocation() {
           code: error?.code,
           message: error?.message
         });
-        locationLog("gps-error-fallback-to-ip", {
+        locationLog("gps-error", {
           code: error?.code,
           message: error?.message,
           elapsedMs: Math.round(performance.now() - startedAt)
@@ -1590,7 +2225,17 @@ async function getLocation() {
           }
         }
 
-        await startFallback(`gps-error-${error?.code || "unknown"}`);
+        if (REQUIRE_MANDATORY_LOCATION_PERMISSION) {
+          setLocationLoading(false);
+          setPermissionGateVisible(
+            true,
+            "Location permission is required for accurate Agnihotra timings."
+          );
+          return;
+        }
+
+        locationLog("gps-fallback-started", { reason: `gps-error-${error?.code || "unknown"}` });
+        await getApproximateLocation();
       },
       {
         enableHighAccuracy: false,
@@ -1600,10 +2245,17 @@ async function getLocation() {
     );
   } else {
     debugLog("location:geolocation-not-supported");
-    locationLog("geolocation-not-supported-fallback-to-ip");
+    locationLog("geolocation-not-supported");
     document.getElementById("userLocation").innerText =
-      "Geolocation not supported. Getting location...";
-    // Try to get approximate location using IP-based geolocation
+      "Geolocation not supported on this device.";
+    setLocationLoading(false);
+    if (REQUIRE_MANDATORY_LOCATION_PERMISSION) {
+      setPermissionGateVisible(
+        true,
+        "Location permission is required, but geolocation is not available on this device."
+      );
+      return;
+    }
     await getApproximateLocation();
   }
 }
@@ -1949,21 +2601,43 @@ window.onload = () => {
   debugLog("app:onload");
   setLocationLoading(true);
   setupLanguageToggle();
+  setupTestReminderButton();
   setupScreenWakeLock();
-  window.AgnihotraNotifications?.setup();
-  getLocation();
-  updateOnlineStatus();
-  loadTranslations().then(() => {
-    applyTranslations();
-    refreshUpcomingEvents();
+  setupDebugOverlayLogger();
+  bindPermissionGateActions();
+  evaluateMandatoryPermissions({ forcePrompt: false }).then((granted) => {
+    if (granted) {
+      continueAppInitialization();
+      return;
+    }
+    updateOnlineStatus();
   });
 };
 
-// Register Service Worker immediately for offline support
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js')
-    .then(reg => console.log('Service Worker registered', reg))
-    .catch(err => console.error('Service Worker registration failed', err));
+// Register Service Worker only for web/PWA.
+// In Capacitor native runtime, SW caching can serve stale JS and break UI parity.
+if ("serviceWorker" in navigator) {
+  const isNativeRuntime = Boolean(
+    window.Capacitor?.isNativePlatform && window.Capacitor.isNativePlatform()
+  );
+  if (isNativeRuntime) {
+    navigator.serviceWorker
+      .getRegistrations()
+      .then((registrations) =>
+        Promise.all(registrations.map((registration) => registration.unregister()))
+      )
+      .then(() =>
+        console.log("[AGNIHOTRA][SW] unregistered-for-native-runtime")
+      )
+      .catch((err) =>
+        console.warn("[AGNIHOTRA][SW] unregister-failed", err)
+      );
+  } else {
+    navigator.serviceWorker
+      .register("./sw.js")
+      .then((reg) => console.log("Service Worker registered", reg))
+      .catch((err) => console.error("Service Worker registration failed", err));
+  }
 }
 
 window.addEventListener('online', updateOnlineStatus);
@@ -2170,6 +2844,164 @@ function toggleAudio(audioId, button) {
   }
 }
 
+function pauseAllAppAudio() {
+  document.querySelectorAll('.mantra-audio').forEach((audio) => {
+    if (!audio.paused) {
+      audio.pause();
+    }
+  });
+
+  document.querySelectorAll('.play-btn').forEach((button) => {
+    const icon = button.querySelector('i');
+    if (icon && icon.classList.contains('fa-pause')) {
+      icon.classList.replace('fa-pause', 'fa-play');
+    }
+    button.classList.remove('playing');
+  });
+
+  activeBellPlayers.forEach((player) => {
+    try {
+      player.pause();
+      player.currentTime = 0;
+    } catch (_) {}
+  });
+  activeBellPlayers.clear();
+}
+
+function setupNativeAppAudioLifecycle() {
+  const capacitor = window.Capacitor;
+  if (!capacitor?.isNativePlatform || !capacitor.isNativePlatform()) return;
+
+  const appPlugin = capacitor?.Plugins?.App;
+  if (!appPlugin?.addListener) return;
+
+  appPlugin.addListener('appStateChange', ({ isActive }) => {
+    if (!isActive) pauseAllAppAudio();
+  });
+
+  appPlugin.addListener('pause', () => {
+    pauseAllAppAudio();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') {
+      pauseAllAppAudio();
+    }
+  });
+}
+
+function setupMobileMenuToggle() {
+  const nav = document.querySelector("nav");
+  const navCheck = document.getElementById("nav-check");
+  const navIcon = document.querySelector(".nav-icon");
+  const navLabel = navIcon?.querySelector("label");
+  if (!nav || !navCheck || !navIcon || !navLabel) return;
+  let lastToggleTs = 0;
+
+  const logMenu = (message, meta = {}) => {
+    const navLinks = document.querySelector(".nav-links");
+    const computed = navLinks ? getComputedStyle(navLinks) : null;
+    const payload = {
+      checked: navCheck.checked,
+      menuOpenClass: nav.classList.contains("menu-open"),
+      navLinksVisible: computed?.visibility || "unknown",
+      navLinksTransform: computed?.transform || "unknown",
+      ...meta,
+    };
+    console.log(`[AGNIHOTRA][MENU] ${message} ${serializeForConsole(payload)}`);
+  };
+
+  const setMenuOpen = (open, source) => {
+    window.__agnihotraMenuLastToggleAt = Date.now();
+    navCheck.checked = open;
+    nav.classList.toggle("menu-open", open);
+    logMenu(open ? "open" : "close", { source });
+  };
+
+  const toggleMenu = (event, source) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    const now = Date.now();
+    if (now - lastToggleTs < 350) {
+      logMenu("toggle-skipped-dedupe", { source });
+      return;
+    }
+    lastToggleTs = now;
+    const nextOpen = !nav.classList.contains("menu-open");
+    const targetInfo =
+      event?.target instanceof Element
+        ? {
+            targetTag: event.target.tagName,
+            targetClass: event.target.className || "",
+          }
+        : {};
+    logMenu("toggle-request", { source, ...targetInfo });
+    setMenuOpen(nextOpen, source);
+  };
+
+  // Drive checkbox with one primary tap path to avoid double-toggle in Android WebView.
+  navIcon.addEventListener("touchend", (event) => toggleMenu(event, "touchend"));
+  navIcon.addEventListener("pointerup", (event) => toggleMenu(event, "pointerup"));
+  navIcon.addEventListener("click", (event) => toggleMenu(event, "click-fallback"));
+  navLabel.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      toggleMenu(event, "keyboard");
+    }
+  });
+
+  navCheck.addEventListener("change", () => {
+    const isOpen = Boolean(navCheck.checked);
+    nav.classList.toggle("menu-open", isOpen);
+    logMenu("checkbox-change", { syncedOpen: isOpen });
+  });
+  logMenu("setup-complete");
+}
+
+function setupMobileMenuOutsideClose() {
+  const nav = document.querySelector("nav");
+  const navCheck = document.getElementById("nav-check");
+  const navLinks = document.querySelector(".nav-links");
+  const navIcon = document.querySelector(".nav-icon");
+  if (!nav || !navCheck || !navLinks || !navIcon) return;
+
+  const closeMenu = () => {
+    window.__agnihotraMenuLastToggleAt = Date.now();
+    navCheck.checked = false;
+    nav.classList.remove("menu-open");
+    console.log("[AGNIHOTRA][MENU]", "outside-close", {
+      checked: navCheck.checked,
+    });
+  };
+
+  document.addEventListener("click", (event) => {
+    if (!navCheck.checked) return;
+    const lastToggleAt = Number(window.__agnihotraMenuLastToggleAt || 0);
+    if (Date.now() - lastToggleAt < 450) {
+      console.log("[AGNIHOTRA][MENU]", "outside-close-skipped-recent-toggle");
+      return;
+    }
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    const isInsideMenu = navLinks.contains(target) || navIcon.contains(target);
+    if (!isInsideMenu) closeMenu();
+  });
+
+  navLinks.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest("a,button")) {
+      closeMenu();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && navCheck.checked) {
+      closeMenu();
+    }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", function () {
   // Initialize audio players
   initAudioPlayer('sunrise-audio');
@@ -2177,6 +3009,9 @@ document.addEventListener("DOMContentLoaded", function () {
   initAudioPlayer('panchasheel-audio');
   initAudioPlayer('saptashloki-audio');
   initAudioPlayer('trisatya-audio');
+  setupNativeAppAudioLifecycle();
+  setupMobileMenuToggle();
+  setupMobileMenuOutsideClose();
   
   const fadeElements = document.querySelectorAll(".fade-in");
 
