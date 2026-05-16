@@ -1,5 +1,22 @@
-node_modules/*
+# Dependencies
+node_modules/
+
+# Generated web build output
 public/
+
+# Android/Gradle build output
+android/.gradle/
+android/build/
+android/app/build/
+
+# Local release exports
+release/*.apk
+release/*.aab
+
+# Signing files / secrets
+*.jks
+*.keystore
+android/local.properties
 
 # Backup files
 *.backup
@@ -17,3 +34,8 @@ script2.js
 # OS files
 .DS_Store
 Thumbs.db
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

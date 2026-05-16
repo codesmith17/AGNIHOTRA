@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">EternalAgni</string>
+    <string name="title_activity_main">EternalAgni</string>
+    <string name="package_name">com.eternalagni.app</string>
+    <string name="custom_url_scheme">com.eternalagni.app</string>
+</resources>

@@ -1,5 +1,13 @@
 const fs = require('fs');
 const path = require('path');
+const enableTestReminder =
+  String(process.env.AGNI_ENABLE_TEST_REMINDER ?? 'false').toLowerCase() !== 'false';
+const enableDebugOverlay =
+  String(process.env.AGNI_ENABLE_DEBUG_OVERLAY ?? 'false').toLowerCase() !== 'false';
+const testReminderSeconds = Math.max(
+  5,
+  Number.parseInt(process.env.AGNI_TEST_REMINDER_SECONDS ?? '20', 10) || 20
+);
 
 // Create public directory if it doesn't exist
 const publicDir = 'public';
@@ -13,6 +21,9 @@ const filesToCopy = [
     'index.html',
     'manifest.webmanifest',
     'translations.json',
+    'shared/notifications/core.js',
+    'adapters/web/notifications.adapter.js',
+    'adapters/android/notifications.adapter.js',
     'notifications.js',
     'timings-engine.js',
     'script.js', 
@@ -21,6 +32,7 @@ const filesToCopy = [
     'assets/images/eternalagni-icon.png',
     'assets/images/app-icon-192.png',
     'assets/images/app-icon.png',
+    'assets/screenshots/home-desktop.png',
     'assets/screenshots/home-portrait.png',
     'assets/audio/mantras/sunrise-mantra.mpeg',
     'assets/audio/mantras/sunset-mantra.mpeg',
@@ -50,7 +62,16 @@ filesToCopy.forEach(file => {
         if (!fs.existsSync(destinationDir)) {
             fs.mkdirSync(destinationDir, { recursive: true });
         }
-        fs.copyFileSync(file, destinationPath);
+        if (file === 'index.html') {
+            let indexContent = fs.readFileSync(file, 'utf8');
+            indexContent = indexContent
+                .replace(/__AGNI_ENABLE_TEST_REMINDER__/g, String(enableTestReminder))
+                .replace(/__AGNI_ENABLE_DEBUG_OVERLAY__/g, String(enableDebugOverlay))
+                .replace(/__AGNI_TEST_REMINDER_SECONDS__/g, String(testReminderSeconds));
+            fs.writeFileSync(destinationPath, indexContent, 'utf8');
+        } else {
+            fs.copyFileSync(file, destinationPath);
+        }
         console.log(`Copied ${file} to public/`);
     } else {
         console.log(`⚠️  File not found: ${file}`);

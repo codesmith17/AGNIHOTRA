@@ -59,6 +59,206 @@ chrome.exe --disable-web-security --user-data-dir="c:/temp/chrome_dev" file:///p
 google-chrome --disable-web-security --user-data-dir="/tmp/chrome_dev" file://$(pwd)/index.html
 ```
 
+## Android App Build (Capacitor)
+
+This project includes a Capacitor Android app in `android/` and can generate:
+
+- Debug APK for local/device testing
+- Release AAB/APK for Play Store or production distribution
+
+### Prerequisites (one-time setup)
+
+1. Install Node dependencies:
+```bash
+npm install
+```
+
+2. Install Android Studio (includes Android SDK tools).
+
+3. Ensure `android/local.properties` exists with your SDK path:
+```properties
+sdk.dir=/opt/homebrew/share/android-commandlinetools
+```
+If your SDK is elsewhere, update the path accordingly.
+
+4. Verify Android platform tools (`adb`) are available:
+```bash
+adb version
+```
+
+### Device Setup (first-time install)
+
+#### USB debugging
+
+1. On phone: enable Developer options and turn on USB debugging.
+2. Connect phone via USB and accept the trust prompt.
+3. Verify device connection:
+
+```bash
+adb devices
+```
+
+#### Wireless ADB (optional)
+
+```bash
+# Pair once using the pairing IP:PORT shown on phone
+adb pair <PHONE_IP:PAIR_PORT>
+
+# Connect using the connect IP:PORT shown on phone
+adb connect <PHONE_IP:CONNECT_PORT>
+adb devices
+```
+
+### Local Build (debug/testing)
+
+Use these commands from repo root:
+
+```bash
+# (Optional) regenerate Android icons/splash from resources/
+npm run assets:android
+
+# Build web assets and sync to Android project
+npm run android:sync
+
+# Build debug APK
+npm run android:apk
+```
+
+Debug APK output:
+
+`android/app/build/outputs/apk/debug/app-debug.apk`
+
+You can install it on a connected device with:
+
+```bash
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+### Fast Reinstall Flow (recommended during testing)
+
+Use this exact sequence to rebuild and ensure latest JS/native changes are on device:
+
+```bash
+cd "/Users/krishnatripathi/Desktop/AGNIHOTRA"
+npm run android:apk
+adb uninstall com.eternalagni.app
+adb install -r "/Users/krishnatripathi/Desktop/AGNIHOTRA/android/app/build/outputs/apk/debug/app-debug.apk"
+```
+
+After install, open app. It should request required permissions (location + notifications).
+
+### Build Release APK and Save to `release/`
+
+Use this flow to generate the latest Android splash/icons, build a release APK, and copy it into a top-level `release/` folder:
+
+```bash
+cd "/Users/krishnatripathi/Desktop/AGNIHOTRA"
+npm run assets:android
+npm run android:sync
+cd android && ./gradlew assembleRelease
+cd ..
+mkdir -p release
+cp android/app/build/outputs/apk/release/app-release-unsigned.apk release/agnihotra-release-unsigned.apk
+```
+
+Output file:
+
+`release/agnihotra-release-unsigned.apk`
+
+> Note: this is an unsigned release APK. For Play Store upload, prefer signed AAB (`npm run android:aab` with keystore config).
+
+### Permission Troubleshooting Logs
+
+If location prompt does not appear, capture only location debug lines:
+
+```bash
+adb logcat -v time '*:I' | awk '/AGNIHOTRA\]\[LOCATION/ { print }'
+```
+
+For menu + notification diagnostics:
+
+```bash
+adb logcat -v time '*:I' | awk '/AGNIHOTRA\]\[(MENU|NOTIFY|ALERT|SW|LOCATION)/ { print }'
+```
+
+### Open in Android Studio
+
+```bash
+npm run android:open
+```
+
+From Android Studio you can run on emulator/physical device and use Logcat.
+
+### Production Build (release)
+
+#### 1) Generate a signing keystore (one-time)
+
+```bash
+keytool -genkey -v -keystore release-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias release
+```
+
+Store `release-key.jks` in a safe location (do not lose it).
+
+#### 2) Configure signing in Gradle
+
+Add these values in `android/gradle.properties`:
+
+```properties
+MYAPP_UPLOAD_STORE_FILE=release-key.jks
+MYAPP_UPLOAD_KEY_ALIAS=release
+MYAPP_UPLOAD_STORE_PASSWORD=your_store_password
+MYAPP_UPLOAD_KEY_PASSWORD=your_key_password
+```
+
+Then reference them in `android/app/build.gradle` under `signingConfigs` and `buildTypes.release` (standard Android signing setup).
+
+#### 3) Build release artifacts
+
+```bash
+# Play Store preferred format
+npm run android:aab
+
+# Optional release APK
+cd android && ./gradlew assembleRelease
+```
+
+Release outputs:
+
+- AAB: `android/app/build/outputs/bundle/release/app-release.aab`
+- APK: `android/app/build/outputs/apk/release/app-release.apk`
+
+### Command Reference
+
+- `npm run build` - Build/copy web files to `public/`
+- `npm run android:sync` - Build web + sync Capacitor Android
+- `npm run android:open` - Open Android project in Android Studio
+- `npm run android:apk` - Build debug APK
+- `npm run android:aab` - Build release AAB
+- `npm run assets:android` - Generate Android icon/splash assets
+
+### Notes
+
+- Use debug APK for development/testing only.
+- Use signed release AAB for Play Store.
+- After web code changes, always run `npm run android:sync` before building.
+
+### Runtime Flags (build-time env)
+
+These are read during `npm run build` / `npm run android:sync`:
+
+- `AGNI_ENABLE_TEST_REMINDER=true|false`  
+  Controls visibility/availability of the test reminder button.
+- `AGNI_TEST_REMINDER_SECONDS=<number>`  
+  Test reminder delay in seconds (minimum 5).
+- `AGNI_ENABLE_DEBUG_OVERLAY=true|false`  
+  Controls in-app debug overlay visibility. Defaults to the same value as `AGNI_ENABLE_TEST_REMINDER` when not set.
+
+Quick debug build command (enable both test reminder + debug overlay):
+
+```bash
+AGNI_ENABLE_TEST_REMINDER=true AGNI_ENABLE_DEBUG_OVERLAY=true npm run android:apk
+```
+
 ## How It Works
 
 ### API Priority System

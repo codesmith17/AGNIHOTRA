@@ -51,13 +51,16 @@
             <li><a href="#mantras" data-i18n="nav.mantras">MANTRAS</a></li>
             <li><a href="#schedule" data-i18n="nav.schedule">SCHEDULE</a></li>
             <li><button id="languageToggle" type="button" class="language-toggle-btn">हिंदी</button></li>
+            <li class="nav-lang-item">
+                <p class="nav-lang-label" data-i18n="nav.language">Language</p>
+                <div class="nav-lang-switcher" aria-label="Language selector">
+                    <button type="button" class="lang-option" data-lang="en">English</button>
+                    <button type="button" class="lang-option" data-lang="hi">हिन्दी</button>
+                    <button type="button" class="lang-option" data-lang="mr">मराठी</button>
+                </div>
+            </li>
         </ul>
     </nav>
-    <div class="mobile-lang-switcher" aria-label="Language selector">
-        <button type="button" class="lang-option" data-lang="en">English</button>
-        <button type="button" class="lang-option" data-lang="hi">हिन्दी</button>
-        <button type="button" class="lang-option" data-lang="mr">मराठी</button>
-    </div>
 
     <header class="hero" id="home">
         <video autoplay muted loop playsinline class="hero-video" poster="assets/images/eternalagni-icon.png">
@@ -151,6 +154,10 @@
             <div class="card upcoming-times">
                 <h2 class="section-title" data-i18n="dashboard.nextAgnihotra">Next Agnihotra</h2>
                 <ul id="upcomingTimes" class="times-list"></ul>
+                <div class="test-reminder-wrap">
+                    <button id="testReminderBtn" type="button" class="test-reminder-btn">Test reminder</button>
+                    <p id="testReminderStatus" class="test-reminder-status"></p>
+                </div>
             </div>
 
             <div class="card today-times">
@@ -415,6 +422,16 @@
         <p data-i18n="footer.text">&copy; 2026 EternalAgni. Spreading the Light of Agnihotra.</p>
     </footer>
 
+    <script>
+        window.AGNI_RUNTIME_CONFIG = {
+            enableTestReminder: "__AGNI_ENABLE_TEST_REMINDER__",
+            enableDebugOverlay: "__AGNI_ENABLE_DEBUG_OVERLAY__",
+            testReminderSeconds: "__AGNI_TEST_REMINDER_SECONDS__"
+        };
+    </script>
+    <script src="shared/notifications/core.js"></script>
+    <script src="adapters/web/notifications.adapter.js"></script>
+    <script src="adapters/android/notifications.adapter.js"></script>
     <script src="notifications.js"></script>
     <script src="timings-engine.js"></script>
     <script src="script.js"></script>
