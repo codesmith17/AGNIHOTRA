@@ -150,7 +150,7 @@ body.is-offline .hero {
   padding-top: 80px;
   position: relative;
   overflow: hidden;
-  background-color: #000; /* Deep black base for the video */
+  background-color: #000;
 }
 
 .hero-video {
@@ -878,7 +878,6 @@ body.is-offline .hero {
   position: relative;
   box-shadow: 0 2px 8px rgba(255, 69, 0, 0.3);
   pointer-events: none; /* Allow clicks to pass through to parent */
-  min-width: 16px; /* Ensure handle is always visible */
   will-change: width;
 }
 

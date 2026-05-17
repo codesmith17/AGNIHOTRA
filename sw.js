@@ -1,4 +1,4 @@
-const CACHE_NAME = 'agnihotra-cache-v26';
+const CACHE_NAME = 'agnihotra-cache-v29';
 
 // Critical assets to cache on install
 const CRITICAL_ASSETS = [
