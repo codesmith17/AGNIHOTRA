@@ -395,7 +395,7 @@
 
     <section id="schedule">
         <center>
-            <h2 class="fade-in" data-i18n="schedule.title">3-Month Timing Schedule</h2>
+            <h2 class="fade-in" data-i18n="schedule.title">Agnihotra Schedule</h2>
         </center>
 
         <div class="schedule-section fade-in">
@@ -403,6 +403,18 @@
                 <span class="loading-spinner" aria-hidden="true"></span>
                 <span data-i18n="schedule.preparing">Preparing 3-month schedule in background...</span>
             </div>
+            <div class="schedule-export-panel">
+                <h3 data-i18n="schedule.generator.title">Calendar Generator</h3>
+                <div class="schedule-export-controls">
+                    <label for="scheduleExportStartDate" data-i18n="schedule.export.startLabel">Start date</label>
+                    <input id="scheduleExportStartDate" type="date" />
+                    <label for="scheduleExportEndDate" data-i18n="schedule.export.endLabel">End date</label>
+                    <input id="scheduleExportEndDate" type="date" />
+                    <button id="exportPdfBtn" type="button" class="test-reminder-btn test-reminder-btn--secondary" data-i18n="schedule.export.pdfButton">Export PDF</button>
+                    <button id="exportIcsBtn" type="button" class="test-reminder-btn" data-i18n="schedule.export.icsButton">Export ICS (10 min reminder)</button>
+                </div>
+            </div>
+            <h3 class="schedule-table-heading" data-i18n="schedule.table.title">3-Month Timing Schedule</h3>
             <div class="table-container">
                 <table id="timingsTable">
                     <thead>
@@ -437,6 +449,8 @@
     <script src="adapters/android/notifications.adapter.js"></script>
     <script src="notifications.js"></script>
     <script src="timings-engine.js"></script>
+    <script src="shared/export/pdf-export.js"></script>
+    <script src="shared/export/ics-export.js"></script>
     <script src="script.js"></script>
 </body>
 
