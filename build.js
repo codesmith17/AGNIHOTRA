@@ -22,13 +22,13 @@ const filesToCopy = [
     'manifest.webmanifest',
     'translations.json',
     'shared/notifications/core.js',
+    'shared/audio/bell.js',
     'adapters/web/notifications.adapter.js',
     'adapters/android/notifications.adapter.js',
     'notifications.js',
     'timings-engine.js',
     'script.js', 
     'style.css',
-    'style.css.map',
     'assets/images/eternalagni-icon.png',
     'assets/images/app-icon-192.png',
     'assets/images/app-icon.png',
@@ -45,7 +45,8 @@ const filesToCopy = [
     'assets/images/cow-ghee.jpg',
     'assets/images/unpolished-rice-grains.jpg',
     'assets/images/agnihotra-timing-reference.jpg',
-    'assets/audio/alerts/agnihotra-bell.mp3',
+    'assets/audio/alerts/agnihotra-single-bell.mp3',
+    'assets/audio/alerts/agnihotra-bell-3x.mp3',
     'sw.js'
 ];
 

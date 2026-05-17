@@ -1,0 +1,43 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- Wider central flame with a soft curl -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12.6,2.0
+                          C11.8,3.2 10.7,4.4 10.0,5.8
+                          C8.9,7.7 8.5,9.9 9.4,11.8
+                          C9.9,12.9 10.9,13.5 12.0,13.6
+                          C13.1,13.5 14.2,12.8 14.7,11.7
+                          C15.6,9.7 15.1,7.3 13.9,5.3
+                          C13.3,4.4 12.8,3.4 12.6,2.0 Z" />
+
+    <!-- Wider left wisp -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M7.6,6.8
+                          C6.2,8.2 5.3,10.1 6.0,11.9
+                          C6.4,13.0 7.3,13.7 8.4,13.7
+                          C7.9,12.4 7.7,10.9 8.0,9.4
+                          C8.2,8.4 8.0,7.5 7.6,6.8 Z" />
+
+    <!-- Wider right wisp -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M16.4,6.8
+                          C17.8,8.2 18.7,10.1 18.0,11.9
+                          C17.6,13.0 16.7,13.7 15.6,13.7
+                          C16.1,12.4 16.3,10.9 16.0,9.4
+                          C15.8,8.4 16.0,7.5 16.4,6.8 Z" />
+
+    <!-- Wide, sturdy Agnihotra kund -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M2.4,14.4
+                          L21.6,14.4
+                          L19.6,21.0
+                          L4.4,21.0 Z" />
+</vector>

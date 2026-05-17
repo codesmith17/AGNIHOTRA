@@ -57,7 +57,9 @@
     "notifications.testBody": "Test reminder starts in {{seconds}} seconds.",
     "notifications.testEventLabel": "Test Agnihotra reminder",
     "notifications.testScheduled": "Test reminder set for {{seconds}} seconds.",
-    "notifications.testCountdown": "Test reminder in {{seconds}}s..."
+    "notifications.testCountdown": "Test reminder in {{seconds}}s...",
+    "notifications.mockCountdown": "Mock window opens in {{seconds}}s...",
+    "notifications.mockButton": "Mock window in 10s"
   },
   "hi": {
     "nav.home": "होम",
@@ -117,7 +119,9 @@
     "notifications.testBody": "{{seconds}} सेकंड में परीक्षण रिमाइंडर बजेगा।",
     "notifications.testEventLabel": "परीक्षण अग्निहोत्र रिमाइंडर",
     "notifications.testScheduled": "{{seconds}} सेकंड के लिए परीक्षण रिमाइंडर सेट किया गया।",
-    "notifications.testCountdown": "{{seconds}} सेकंड में परीक्षण रिमाइंडर..."
+    "notifications.testCountdown": "{{seconds}} सेकंड में परीक्षण रिमाइंडर...",
+    "notifications.mockCountdown": "{{seconds}} सेकंड में मॉक विंडो खुलेगी...",
+    "notifications.mockButton": "10 सेकंड में मॉक विंडो"
   },
   "mr": {
     "nav.home": "मुख्यपृष्ठ",
@@ -177,6 +181,8 @@
     "notifications.testBody": "{{seconds}} सेकंदांत चाचणी स्मरण वाजेल.",
     "notifications.testEventLabel": "चाचणी अग्निहोत्र रिमाइंडर",
     "notifications.testScheduled": "{{seconds}} सेकंदांसाठी चाचणी रिमाइंडर सेट केला.",
-    "notifications.testCountdown": "{{seconds}} सेकंदांत चाचणी रिमाइंडर..."
+    "notifications.testCountdown": "{{seconds}} सेकंदांत चाचणी रिमाइंडर...",
+    "notifications.mockCountdown": "{{seconds}} सेकंदांत मॉक विंडो उघडेल...",
+    "notifications.mockButton": "10 सेकंदांत मॉक विंडो"
   }
 }

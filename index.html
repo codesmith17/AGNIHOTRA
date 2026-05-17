@@ -156,7 +156,9 @@
                 <ul id="upcomingTimes" class="times-list"></ul>
                 <div class="test-reminder-wrap">
                     <button id="testReminderBtn" type="button" class="test-reminder-btn">Test reminder</button>
+                    <button id="mockCountdownBtn" type="button" class="test-reminder-btn test-reminder-btn--secondary" data-i18n="notifications.mockButton">Mock window in 10s</button>
                     <p id="testReminderStatus" class="test-reminder-status"></p>
+                    <p id="mockCountdownStatus" class="test-reminder-status"></p>
                 </div>
             </div>
 
@@ -430,6 +432,7 @@
         };
     </script>
     <script src="shared/notifications/core.js"></script>
+    <script src="shared/audio/bell.js"></script>
     <script src="adapters/web/notifications.adapter.js"></script>
     <script src="adapters/android/notifications.adapter.js"></script>
     <script src="notifications.js"></script>
