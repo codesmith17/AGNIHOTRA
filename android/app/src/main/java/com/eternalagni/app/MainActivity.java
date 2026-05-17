@@ -8,6 +8,7 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(AgnihotraWidgetPlugin.class);
         super.onCreate(savedInstanceState);
         // Keep the device screen awake whenever the app's window is in the
         // foreground. This is automatically cleared when the activity is

@@ -4,4 +4,9 @@
     <string name="title_activity_main">EternalAgni</string>
     <string name="package_name">com.eternalagni.app</string>
     <string name="custom_url_scheme">com.eternalagni.app</string>
+    <string name="widget_title">EternalAgni</string>
+    <string name="widget_countdown_title">Countdown</string>
+    <string name="widget_no_timing">Open app to load timing</string>
+    <string name="widget_countdown_passed">Time passed</string>
+    <string name="widget_logo_desc">EternalAgni logo</string>
 </resources>
