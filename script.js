@@ -405,6 +405,56 @@ function getRuntimeBoolean(...values) {
   return false;
 }
 
+function isForcedOfflineModeEnabled() {
+  return getRuntimeBoolean(
+    window.AGNI_RUNTIME_CONFIG?.forceOffline,
+    window.AGNI_FORCE_OFFLINE
+  );
+}
+
+function setupForcedOfflineMode() {
+  if (!isForcedOfflineModeEnabled()) return;
+  if (window.__agnihotraOfflineLockApplied) return;
+  window.__agnihotraOfflineLockApplied = true;
+  window.__agnihotraForcedOffline = true;
+  console.info("[AGNIHOTRA][OFFLINE] forced-offline-mode-enabled");
+
+  if (typeof window.fetch === "function") {
+    window.fetch = (...args) => {
+      const requestUrl = String(args?.[0] ?? "");
+      console.warn("[AGNIHOTRA][OFFLINE] blocked-fetch", { url: requestUrl });
+      return Promise.reject(new TypeError("Forced offline mode enabled"));
+    };
+  }
+
+  if (typeof window.XMLHttpRequest === "function") {
+    class OfflineLockedXMLHttpRequest extends window.XMLHttpRequest {
+      send() {
+        try {
+          this.abort();
+        } catch (_) {}
+        console.warn("[AGNIHOTRA][OFFLINE] blocked-xhr");
+        throw new Error("Forced offline mode enabled");
+      }
+    }
+    window.XMLHttpRequest = OfflineLockedXMLHttpRequest;
+  }
+
+  if (typeof window.WebSocket === "function") {
+    window.WebSocket = class OfflineLockedWebSocket {
+      constructor(url) {
+        console.warn("[AGNIHOTRA][OFFLINE] blocked-websocket", { url: String(url || "") });
+        throw new Error("Forced offline mode enabled");
+      }
+    };
+  }
+}
+
+function isEffectivelyOnline() {
+  if (window.__agnihotraForcedOffline) return false;
+  return Boolean(navigator.onLine);
+}
+
 function isDebugEnabled() {
   return localStorage.getItem(DEBUG_STORAGE_KEY) === "1";
 }
@@ -3256,7 +3306,8 @@ async function getLocation() {
   // Immediate bootstrap for reload reliability: show last known location/timings first.
   const lastKnown = getLastKnownLocation();
   if (lastKnown) {
-    const fastLocationText = lastKnown.locationName || "Saved nearby place";
+    const fastLocationText =
+      lastKnown.locationName || "Detecting nearby place...";
     document.getElementById("userLocation").innerText = `Your Location: ${fastLocationText}`;
     debugLog("location:last-known-bootstrap", {
       lat: lastKnown.lat,
@@ -3380,13 +3431,15 @@ async function reverseGeocode(latitude, longitude, skipTimingFetch = false) {
     if (!navigator.onLine) {
       // Try to get cached location name
       const cache = getValidCachedData(latitude, longitude);
-      const locationDisplay = cache && cache.locationName 
-        ? cache.locationName 
-        : "Nearby place";
-      
-      document.getElementById("userLocation").innerHTML = `
+      const locationDisplay = cache && cache.locationName ? cache.locationName : "";
+      document.getElementById("userLocation").innerHTML = locationDisplay
+        ? `
         <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Offline Mode:</span>
         <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">${locationDisplay}</span>
+      `
+        : `
+        <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Offline Mode:</span>
+        <span style="font-weight: 600; font-size: 1rem; line-height: 1.4; display: block;">Place name unavailable offline. Connect once to fetch nearby city/state.</span>
       `;
       if (!skipTimingFetch) {
         await getSunriseSunset(latitude, longitude);
@@ -3465,7 +3518,7 @@ async function reverseGeocode(latitude, longitude, skipTimingFetch = false) {
   } catch (error) {
     // Fall back to generic location label (no coordinates in UI)
     document.getElementById("userLocation").innerText =
-      "Your Location: Nearby place";
+      "Your Location: Place name unavailable";
     if (!skipTimingFetch) {
       await getSunriseSunset(latitude, longitude);
     }
@@ -3503,13 +3556,10 @@ async function reverseGeocodeApproximate(latitude, longitude, skipTimingFetch = 
     // If offline, skip API call
     if (!navigator.onLine) {
       const cache = getValidCachedData(latitude, longitude);
-      const locationDisplay = cache && cache.locationName 
-        ? `${cache.locationName}` 
-        : "Nearby place";
-      
-      document.getElementById(
-        "userLocation"
-      ).innerText = `Offline Mode: ${locationDisplay}`;
+      const locationDisplay = cache && cache.locationName ? `${cache.locationName}` : "";
+      document.getElementById("userLocation").innerText = locationDisplay
+        ? `Offline Mode: ${locationDisplay}`
+        : "Offline Mode: Place name unavailable. Connect once to fetch nearby city/state.";
       if (!skipTimingFetch) {
         await getSunriseSunset(latitude, longitude);
       }
@@ -3553,7 +3603,7 @@ async function reverseGeocodeApproximate(latitude, longitude, skipTimingFetch = 
     } else {
       // Fall back to generic location label (no coordinates in UI)
       document.getElementById("userLocation").innerText =
-        "Your Location: Nearby place";
+        "Your Location: Place name unavailable";
       saveLastKnownLocation(latitude, longitude);
       if (!skipTimingFetch) {
         await getSunriseSunset(latitude, longitude);
@@ -3568,7 +3618,7 @@ async function reverseGeocodeApproximate(latitude, longitude, skipTimingFetch = 
   } catch (error) {
     // Fall back to generic location label (no coordinates in UI)
     document.getElementById("userLocation").innerText =
-      "Your Location: Nearby place";
+      "Your Location: Place name unavailable";
     saveLastKnownLocation(latitude, longitude);
     if (!skipTimingFetch) {
       await getSunriseSunset(latitude, longitude);
@@ -3696,7 +3746,7 @@ async function showError(error) {
   function updateOnlineStatus() {
     const indicator = document.getElementById('offline-indicator');
     if (indicator) {
-      if (navigator.onLine) {
+      if (isEffectivelyOnline()) {
         indicator.style.display = 'none';
         document.body.classList.remove('is-offline');
       } else {
@@ -3714,6 +3764,7 @@ window.onload = () => {
     document.body.classList.add("notranslate");
   }
   debugLog("app:onload");
+  setupForcedOfflineMode();
   setLocationLoading(true);
   setupLanguageToggle();
   setupTestReminderButton();

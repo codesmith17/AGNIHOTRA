@@ -265,11 +265,19 @@ These are read during `npm run build` / `npm run android:sync`:
   Test reminder delay in seconds (minimum 5).
 - `AGNI_ENABLE_DEBUG_OVERLAY=true|false`  
   Controls in-app debug overlay visibility. Defaults to the same value as `AGNI_ENABLE_TEST_REMINDER` when not set.
+- `AGNI_FORCE_OFFLINE=true|false`  
+  Forces app-level offline mode by blocking web network calls (`fetch`/`XHR`/`WebSocket`) even when phone internet is ON.
 
 Quick debug build command (enable both test reminder + debug overlay):
 
 ```bash
 AGNI_ENABLE_TEST_REMINDER=true AGNI_ENABLE_DEBUG_OVERLAY=true npm run android:apk
+```
+
+Offline simulation build command:
+
+```bash
+AGNI_FORCE_OFFLINE=true npm run android:apk
 ```
 
 ## How It Works
