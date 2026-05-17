@@ -1201,7 +1201,7 @@ async function syncNativeWidgetLanguage() {
   try {
     await widgetPlugin.setLocalizationStrings({
       widgetTitle: t("widget.title", "EternalAgni"),
-      widgetCountdownLabel: t("widget.countdown", "Countdown"),
+      widgetCountdownLabel: "Countdown",
       widgetTimePassedLabel: t("widget.timePassed", "Time passed"),
       widgetNoTimingLabel: t("widget.noTiming", "Open app to load timing"),
     });
@@ -1975,7 +1975,7 @@ async function syncNativeHomescreenWidget(nextEvent) {
       targetMs: Number(nextEvent.time || 0),
       timeText: formatDateTimeToTimeOnly(nextEvent.time),
       widgetTitle: t("widget.title", "EternalAgni"),
-      widgetCountdownLabel: t("widget.countdown", "Countdown"),
+      widgetCountdownLabel: "Countdown",
       widgetTimePassedLabel: t("widget.timePassed", "Time passed"),
       widgetNoTimingLabel: t("widget.noTiming", "Open app to load timing"),
     });
