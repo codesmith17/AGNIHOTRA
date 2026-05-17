@@ -40,8 +40,18 @@
         sound: shared.CAPACITOR_NOTIFICATION_SOUND,
         vibration: true,
       });
+      // Secondary channel intended for watch-friendly tiny nudge (silent + vibration).
+      await localNotifications.createChannel({
+        id: shared.CAPACITOR_WEAR_CHANNEL_ID,
+        name: "Agnihotra Watch Nudge",
+        description: "Tiny vibration reminder for paired watch",
+        importance: 2,
+        visibility: 1,
+        vibration: true,
+      });
       logNotify("channel-create-done", {
         channelId: shared.CAPACITOR_CHANNEL_ID,
+        wearChannelId: shared.CAPACITOR_WEAR_CHANNEL_ID,
       });
     } catch (error) {
       console.warn("Capacitor channel setup skipped:", error);
@@ -141,6 +151,8 @@
           : Number(options?.leadMinutes || 10);
       const replaceExisting =
         typeof options === "object" ? options?.replaceExisting !== false : true;
+      const includeWearNudge =
+        typeof options === "object" ? options?.includeWearNudge !== false : true;
       const reminderLeadMs = leadMinutes * 60 * 1000;
 
       if (replaceExisting) {
@@ -184,7 +196,7 @@
           const id = shared.toCapacitorNotificationId(tag);
           if (seenIds.has(id)) return [];
           seenIds.add(id);
-          return {
+          const primary = {
             id,
             title: event.reminderTitle || "Agnihotra reminder",
             body:
@@ -206,6 +218,36 @@
               catchUp: missedReminderButEventUpcoming,
             },
           };
+          if (!includeWearNudge) return [primary];
+
+          const wearTag = `${tag}-wear`;
+          const wearId = shared.toCapacitorNotificationId(wearTag);
+          if (seenIds.has(wearId)) return [primary];
+          seenIds.add(wearId);
+          const wear = {
+            id: wearId,
+            title: event.reminderTitle || "Agnihotra reminder",
+            body:
+              event.reminderBody ||
+              `${event.label} starts in ${leadMinutes} minutes.`,
+            schedule: {
+              at: new Date(firstFireAt),
+              allowWhileIdle: true,
+            },
+            channelId: shared.CAPACITOR_WEAR_CHANNEL_ID,
+            group: shared.CAPACITOR_NOTIFICATION_GROUP,
+            // Keep watch nudge silent; vibration is controlled by channel.
+            smallIcon: "ic_stat_notify",
+            iconColor: "#E07B26",
+            extra: {
+              tag: wearTag,
+              eventId: event.id,
+              eventTime,
+              catchUp: missedReminderButEventUpcoming,
+              wearNudge: true,
+            },
+          };
+          return [primary, wear];
         })
         .filter(Boolean);
 

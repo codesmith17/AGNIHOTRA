@@ -2,6 +2,7 @@
   window.AgnihotraNotificationShared = {
     // Bump channel id when changing Android channel sound settings (Android keeps channels immutable).
     CAPACITOR_CHANNEL_ID: "agnihotra-reminders-bell-v4",
+    CAPACITOR_WEAR_CHANNEL_ID: "agnihotra-watch-nudge-v1",
     CAPACITOR_NOTIFICATION_GROUP: "agnihotra-reminder",
     // Android custom sound should be a filename from android/app/src/main/res/raw without extension.
     CAPACITOR_NOTIFICATION_SOUND: "agnihotra_bell_3x",
