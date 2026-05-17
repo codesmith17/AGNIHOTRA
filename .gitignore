@@ -12,6 +12,7 @@ android/app/build/
 # Local release exports
 release/*.apk
 release/*.aab
+release/*.idsig
 
 # Signing files / secrets
 *.jks
