@@ -134,6 +134,19 @@ You can install it on a connected device with:
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+### One-script Android workflow (`agni-android.sh`)
+
+For daily use, run the helper script from repo root:
+
+```bash
+./agni-android.sh help
+./agni-android.sh debug-build-install-run
+./agni-android.sh release-build-sign
+./agni-android.sh screenshot widget-check.png
+```
+
+This covers debug build/install, release build+sign, and ADB screenshot capture in one place.
+
 ### Fast Reinstall Flow (recommended during testing)
 
 Use this exact sequence to rebuild and ensure latest JS/native changes are on device:
