@@ -1191,6 +1191,23 @@ function applyTranslations() {
     btn.classList.toggle("active", btn.getAttribute("data-lang") === currentLanguage);
   });
   updateTestReminderButtonCopy();
+  syncNativeWidgetLanguage();
+}
+
+async function syncNativeWidgetLanguage() {
+  if (!isNativeAppRuntime()) return;
+  const widgetPlugin = window.Capacitor?.Plugins?.AgnihotraWidget;
+  if (!widgetPlugin?.setLocalizationStrings) return;
+  try {
+    await widgetPlugin.setLocalizationStrings({
+      widgetTitle: t("widget.title", "EternalAgni"),
+      widgetCountdownLabel: t("widget.countdown", "Countdown"),
+      widgetTimePassedLabel: t("widget.timePassed", "Time passed"),
+      widgetNoTimingLabel: t("widget.noTiming", "Open app to load timing"),
+    });
+  } catch (error) {
+    console.warn("[AGNIHOTRA][WIDGET] language-sync-failed", error);
+  }
 }
 
 function setupLanguageToggle() {
@@ -1376,6 +1393,20 @@ function refreshUpcomingEvents() {
   if (todayData.date && tomorrowData.date) {
     displayUpcomingTimings(todayData, tomorrowData, "upcomingTimes");
   }
+}
+
+let upcomingRefreshTimeoutId = null;
+function requestUpcomingEventsRefresh(reason = "countdown-elapsed") {
+  const now = Date.now();
+  const lastRefreshAt = Number(window.__agnihotraLastUpcomingRefreshAt || 0);
+  if (now - lastRefreshAt < 1000) return;
+  window.__agnihotraLastUpcomingRefreshAt = now;
+  if (upcomingRefreshTimeoutId) return;
+  upcomingRefreshTimeoutId = setTimeout(() => {
+    upcomingRefreshTimeoutId = null;
+    console.log("[AGNIHOTRA][COUNTDOWN] refreshing-upcoming-events", { reason });
+    refreshUpcomingEvents();
+  }, 0);
 }
 
 function setLocationLoading(isLoading) {
@@ -1926,6 +1957,31 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
     );
   });
 
+  const nextEvent = upcomingEvents[0];
+  if (nextEvent) {
+    syncNativeHomescreenWidget(nextEvent);
+  }
+
+}
+
+async function syncNativeHomescreenWidget(nextEvent) {
+  if (!isNativeAppRuntime()) return;
+  const widgetPlugin = window.Capacitor?.Plugins?.AgnihotraWidget;
+  if (!widgetPlugin?.setNextTiming) return;
+
+  try {
+    await widgetPlugin.setNextTiming({
+      label: nextEvent.label,
+      targetMs: Number(nextEvent.time || 0),
+      timeText: formatDateTimeToTimeOnly(nextEvent.time),
+      widgetTitle: t("widget.title", "EternalAgni"),
+      widgetCountdownLabel: t("widget.countdown", "Countdown"),
+      widgetTimePassedLabel: t("widget.timePassed", "Time passed"),
+      widgetNoTimingLabel: t("widget.noTiming", "Open app to load timing"),
+    });
+  } catch (error) {
+    console.warn("[AGNIHOTRA][WIDGET] sync-failed", error);
+  }
 }
 
 // Helper function to parse date and time into timestamp
@@ -2097,11 +2153,15 @@ function displayCountdownAndTime(element, id, label, time, isSunrise) {
   const uniqueId = id;
   const iconClass = isSunrise ? "fas fa-sun" : "fas fa-moon";
   const iconColor = isSunrise ? "#FFD700" : "#4B0082";
+  const atTemplate = t("countdown.atTime", "at {{time}}");
+  const atText = interpolateTemplate(atTemplate, {
+    time: formatDateTimeToTimeOnly(time),
+  });
 
   itemDiv.innerHTML = `
         <span class="time-label"><i class="${iconClass}" style="color: ${iconColor};"></i> ${label.toUpperCase()}</span>
         <span id="${uniqueId}Countdown" class="countdown-value">--h --m --s</span>
-        <span class="time-secondary">at ${formatDateTimeToTimeOnly(time)}</span>
+        <span class="time-secondary">${atText}</span>
     `;
 
   element.appendChild(itemDiv);
@@ -2227,16 +2287,34 @@ function updateCountdown(type, targetTime) {
     const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
 
+    const withDaysTemplate = t(
+      "countdown.format.withDays",
+      "{{days}}d {{hours}}h {{minutes}}m {{seconds}}s"
+    );
+    const noDaysTemplate = t(
+      "countdown.format.noDays",
+      "{{hours}}h {{minutes}}m {{seconds}}s"
+    );
     let countdownText = "";
     if (days > 0) {
-      countdownText = `${days}d ${hours}h ${minutes}m ${seconds}s`;
+      countdownText = interpolateTemplate(withDaysTemplate, {
+        days,
+        hours,
+        minutes,
+        seconds,
+      });
     } else {
-      countdownText = `${hours}h ${minutes}m ${seconds}s`;
+      countdownText = interpolateTemplate(noDaysTemplate, {
+        hours,
+        minutes,
+        seconds,
+      });
     }
 
     countdownElement.innerText = countdownText;
   } else {
-    countdownElement.innerText = "Time passed";
+    // Never show "Time passed". Immediately rotate to the next upcoming slots.
+    requestUpcomingEventsRefresh("event-window-passed");
   }
 }
 
