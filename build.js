@@ -4,6 +4,8 @@ const enableTestReminder =
   String(process.env.AGNI_ENABLE_TEST_REMINDER ?? 'false').toLowerCase() !== 'false';
 const enableDebugOverlay =
   String(process.env.AGNI_ENABLE_DEBUG_OVERLAY ?? 'false').toLowerCase() !== 'false';
+const forceOfflineMode =
+  String(process.env.AGNI_FORCE_OFFLINE ?? 'false').toLowerCase() !== 'false';
 const testReminderSeconds = Math.max(
   5,
   Number.parseInt(process.env.AGNI_TEST_REMINDER_SECONDS ?? '20', 10) || 20
@@ -70,6 +72,7 @@ filesToCopy.forEach(file => {
             indexContent = indexContent
                 .replace(/__AGNI_ENABLE_TEST_REMINDER__/g, String(enableTestReminder))
                 .replace(/__AGNI_ENABLE_DEBUG_OVERLAY__/g, String(enableDebugOverlay))
+                .replace(/__AGNI_FORCE_OFFLINE__/g, String(forceOfflineMode))
                 .replace(/__AGNI_TEST_REMINDER_SECONDS__/g, String(testReminderSeconds));
             fs.writeFileSync(destinationPath, indexContent, 'utf8');
         } else {
