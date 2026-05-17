@@ -335,13 +335,50 @@ const CACHE_EXPIRY_MS = 6 * 30 * 24 * 60 * 60 * 1000; // 6 months in millisecond
 const TRANSLATION_STORAGE_KEY = "agnihotra_language";
 const DEBUG_STORAGE_KEY = "agnihotra_debug";
 const LAST_KNOWN_LOCATION_KEY = "agnihotra_last_known_location";
+const EXPORT_FILE_REGISTRY_KEY = "agnihotra_export_file_registry_v1";
+const EXPORT_NOTIFICATION_CHANNEL_ID = "agnihotra-export-default-v2";
 const LOCATION_NAME_REFRESH_DISTANCE_KM = 3;
 const REQUIRE_MANDATORY_LOCATION_PERMISSION = true;
 const REQUIRE_MANDATORY_NOTIFICATION_PERMISSION = true;
 let translations = {};
 let latestTimingsForNativeReminders = null;
+let latestExportLocationMeta = null;
 let agnihotraMainInitStarted = false;
 let permissionGateBound = false;
+const exportNotificationReceiptWaiters = new Map();
+
+function markExportNotificationReceived(notificationId, meta = {}) {
+  if (!notificationId || !exportNotificationReceiptWaiters.has(notificationId)) return;
+  const waiter = exportNotificationReceiptWaiters.get(notificationId);
+  clearTimeout(waiter.timeoutHandle);
+  exportNotificationReceiptWaiters.delete(notificationId);
+  waiter.resolve({
+    received: true,
+    receivedAtMs: Date.now(),
+    ...meta,
+  });
+}
+
+function waitForExportNotificationReceipt(notificationId, timeoutMs = 4500) {
+  if (!notificationId) {
+    return Promise.resolve({ received: false, reason: "no-notification-id" });
+  }
+  return new Promise((resolve) => {
+    const timeoutHandle = setTimeout(() => {
+      exportNotificationReceiptWaiters.delete(notificationId);
+      resolve({
+        received: false,
+        reason: "timeout",
+        timedOutAtMs: Date.now(),
+      });
+    }, Math.max(500, timeoutMs));
+
+    exportNotificationReceiptWaiters.set(notificationId, {
+      resolve,
+      timeoutHandle,
+    });
+  });
+}
 
 function getStoredLanguagePreference() {
   const saved = localStorage.getItem(TRANSLATION_STORAGE_KEY);
@@ -1515,6 +1552,11 @@ async function getSunriseSunset(lat, lng, locationName = null) {
 
   const startedAt = performance.now();
   debugLog("timings:start", { lat, lng });
+  latestExportLocationMeta = {
+    lat,
+    lng,
+    locationName: locationName || null,
+  };
 
   try {
     const today = new Date();
@@ -1527,6 +1569,11 @@ async function getSunriseSunset(lat, lng, locationName = null) {
     // 1) Check cache first for instant display
     const cache = getValidCachedData(lat, lng);
     if (cache && cache.timings[todayFormatted]) {
+      latestExportLocationMeta = {
+        lat,
+        lng,
+        locationName: cache.locationName || locationName || null,
+      };
       const todayData = cache.timings[todayFormatted];
       const tomorrowData = cache.timings[tomorrowFormatted];
 
@@ -1867,11 +1914,881 @@ function displayFullSchedule(timings) {
 
     row.innerHTML = `
             <td>${dateStr}</td>
-            <td>${data.sunrise}</td>
-            <td>${data.sunset}</td>
+            <td>${formatTimeToAMPM(data.sunrise)}</td>
+            <td>${formatTimeToAMPM(data.sunset)}</td>
         `;
     tableBody.appendChild(row);
   });
+}
+
+function setScheduleExportStatus(message, isError = false) {
+  const status = document.getElementById("scheduleExportStatus");
+  if (!status) return;
+  status.textContent = message || "";
+  status.style.color = isError ? "#a02828" : "var(--copper)";
+  exportLog("status", { message, isError });
+}
+
+function exportLog(event, payload = null) {
+  if (payload == null) {
+    console.log(`[AGNIHOTRA][EXPORT] ${event}`);
+    return;
+  }
+  console.log(`[AGNIHOTRA][EXPORT] ${event} ${serializeForConsole(payload)}`);
+}
+
+function showExportToast(message, isError = false) {
+  if (!message || typeof document === "undefined" || !document.body) return;
+  const old = document.getElementById("scheduleExportToast");
+  if (old) old.remove();
+  const toast = document.createElement("div");
+  toast.id = "scheduleExportToast";
+  toast.textContent = message;
+  toast.style.position = "fixed";
+  toast.style.left = "50%";
+  toast.style.top = "84px";
+  toast.style.transform = "translateX(-50%)";
+  toast.style.zIndex = "9999";
+  toast.style.maxWidth = "92vw";
+  toast.style.padding = "12px 16px";
+  toast.style.borderRadius = "12px";
+  toast.style.fontSize = "0.95rem";
+  toast.style.fontWeight = "700";
+  toast.style.color = "#fff";
+  toast.style.background = isError ? "rgba(164, 40, 40, 0.95)" : "rgba(62, 124, 48, 0.95)";
+  toast.style.boxShadow = "0 12px 26px rgba(0,0,0,0.30)";
+  toast.style.border = "1px solid rgba(255,255,255,0.18)";
+  document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.remove();
+  }, 3600);
+}
+
+function showInstantExportFeedback(message, isError = false) {
+  const normalized = String(message || "").toLowerCase();
+  if (normalized.includes("opening") || normalized.includes("tap delay")) {
+    return;
+  }
+  showExportToast(message, isError);
+}
+
+function getEffectiveExportLocation() {
+  if (latestExportLocationMeta?.lat && latestExportLocationMeta?.lng) {
+    return latestExportLocationMeta;
+  }
+  const cacheRaw = localStorage.getItem(CACHE_KEY);
+  if (!cacheRaw) return null;
+  try {
+    const cache = JSON.parse(cacheRaw);
+    if (cache?.lat && cache?.lng) {
+      return {
+        lat: cache.lat,
+        lng: cache.lng,
+        locationName: cache.locationName || null,
+      };
+    }
+  } catch (_) {}
+  return null;
+}
+
+function resolveExportLocationName(rawName) {
+  const candidate = String(rawName || "").trim();
+  const genericLabel = String(t("dashboard.location", "Location") || "Location").trim();
+  if (!candidate) return t("dashboard.currentLocation", "Current Location");
+  const normalized = candidate.toLowerCase();
+  const genericNormalized = genericLabel.toLowerCase();
+  // Avoid placeholder-like labels in generated files.
+  if (
+    normalized === genericNormalized ||
+    ["location", "current location", "स्थान", "ठिकाण", "लोकेशन"].includes(normalized)
+  ) {
+    return t("dashboard.currentLocation", "Current Location");
+  }
+  return candidate;
+}
+
+function isGenericExportLocationName(rawName) {
+  const candidate = String(rawName || "").trim();
+  if (!candidate) return true;
+  const genericLabel = String(t("dashboard.location", "Location") || "Location").trim();
+  const normalized = candidate.toLowerCase();
+  const genericNormalized = genericLabel.toLowerCase();
+  return (
+    normalized === genericNormalized ||
+    ["location", "current location", "स्थान", "ठिकाण", "लोकेशन"].includes(normalized)
+  );
+}
+
+async function resolveExportLocationNameForCoordinates(lat, lng, rawName) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return resolveExportLocationName(rawName);
+  }
+  if (!isGenericExportLocationName(rawName)) {
+    return resolveExportLocationName(rawName);
+  }
+
+  const nearby = getNearbyCachedLocationName(lat, lng);
+  if (nearby && !isGenericExportLocationName(nearby)) {
+    return resolveExportLocationName(nearby);
+  }
+
+  try {
+    const bdcResponse = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
+    );
+    if (bdcResponse.ok) {
+      const data = await bdcResponse.json();
+      const bdcName = [
+        data.city || data.locality || data.principalSubdivision,
+        data.principalSubdivision || data.countryName,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      if (bdcName && !isGenericExportLocationName(bdcName)) {
+        saveLastKnownLocation(lat, lng, bdcName);
+        return bdcName;
+      }
+    }
+  } catch (_) {}
+
+  try {
+    const nominatimResponse = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
+      { headers: { Accept: "application/json" } }
+    );
+    if (nominatimResponse.ok) {
+      const data = await nominatimResponse.json();
+      const address = data?.display_name || "";
+      if (address && !isGenericExportLocationName(address)) {
+        saveLastKnownLocation(lat, lng, address);
+        return address;
+      }
+    }
+  } catch (_) {}
+
+  return resolveExportLocationName(rawName);
+}
+
+function formatDateInputValue(dateObj) {
+  const y = dateObj.getFullYear();
+  const m = String(dateObj.getMonth() + 1).padStart(2, "0");
+  const d = String(dateObj.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function parseDateInput(dateValue) {
+  if (!dateValue || !dateValue.includes("-")) return null;
+  const [yearStr, monthStr, dayStr] = dateValue.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (!year || !month || !day) return null;
+  const parsed = new Date(year, month - 1, day);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+async function buildRangeTimingRows(startDateValue, endDateValue) {
+  exportLog("build-range-start", {
+    startDateValue,
+    endDateValue,
+  });
+  const startDate = parseDateInput(startDateValue);
+  const endDate = parseDateInput(endDateValue);
+  if (!startDate || !endDate) return null;
+  const exportLocation = getEffectiveExportLocation();
+  if (!exportLocation?.lat || !exportLocation?.lng) return null;
+  exportLog("location-name-resolve-start", {
+    lat: exportLocation.lat,
+    lng: exportLocation.lng,
+    current: exportLocation.locationName || null,
+  });
+  exportLocation.locationName = await resolveExportLocationNameForCoordinates(
+    exportLocation.lat,
+    exportLocation.lng,
+    exportLocation.locationName
+  );
+  latestExportLocationMeta = {
+    lat: exportLocation.lat,
+    lng: exportLocation.lng,
+    locationName: exportLocation.locationName,
+  };
+  exportLog("location-name-resolve-done", {
+    locationName: exportLocation.locationName || null,
+  });
+
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+  const daysInRange = Math.floor((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+  if (daysInRange <= 0) return null;
+  exportLog("build-range-meta", {
+    startDate: formatDateInputValue(start),
+    endDate: formatDateInputValue(end),
+    daysInRange,
+    lat: exportLocation.lat,
+    lng: exportLocation.lng,
+    locationName: exportLocation.locationName || null,
+  });
+
+  const timingsMap = window.AgnihotraTimingEngine?.generateRangeTimings
+    ? await window.AgnihotraTimingEngine.generateRangeTimings(
+        exportLocation.lat,
+        exportLocation.lng,
+        daysInRange,
+        start
+      )
+    : generateLocal6MonthTimings(exportLocation.lat, exportLocation.lng);
+
+  const rows = Object.values(timingsMap || {})
+    .filter((row) => row?.date && row?.sunrise && row?.sunset)
+    .sort((a, b) => parseDateTime(a.date, "00:00:00") - parseDateTime(b.date, "00:00:00"));
+  exportLog("build-range-done", {
+    rows: rows.length,
+    firstDate: rows[0]?.date || null,
+    lastDate: rows[rows.length - 1]?.date || null,
+  });
+
+  return {
+    rows,
+    exportLocation,
+    startDate: start,
+    endDate: end,
+  };
+}
+
+function buildIcsContent(rows, locationName) {
+  const icsExporter = window.AgnihotraIcsExport;
+  if (!icsExporter?.buildIcsContent) {
+    throw new Error("ICS exporter module unavailable.");
+  }
+  return icsExporter.buildIcsContent({
+    rows,
+    locationName,
+    sunriseLabel: t("timeLabels.sunrise", "SUNRISE"),
+    sunsetLabel: t("timeLabels.sunset", "SUNSET"),
+  });
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function blobToBase64Payload(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Unable to read blob."));
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const commaIndex = result.indexOf(",");
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+function saveExportRegistryEntry(entry) {
+  try {
+    const raw = localStorage.getItem(EXPORT_FILE_REGISTRY_KEY);
+    const registry = raw ? JSON.parse(raw) : {};
+    registry[entry.filename] = {
+      filename: entry.filename,
+      path: entry.path || null,
+      uri: entry.uri || null,
+      mime: entry.mime || null,
+      bytes: Number(entry.bytes) || 0,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(EXPORT_FILE_REGISTRY_KEY, JSON.stringify(registry));
+  } catch (_) {}
+}
+
+function getExportRegistryEntry(filename) {
+  try {
+    const raw = localStorage.getItem(EXPORT_FILE_REGISTRY_KEY);
+    if (!raw) return null;
+    const registry = JSON.parse(raw);
+    return registry?.[filename] || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function saveFileInNativeStorage(blob, filename, mime) {
+  if (!isNativeAppRuntime()) return null;
+  const filesystem = window.Capacitor?.Plugins?.Filesystem;
+  if (!filesystem?.writeFile) {
+    exportLog("native-save-skipped", { filename, reason: "filesystem-plugin-missing" });
+    return null;
+  }
+
+  const path = `EternalAgniExports/${filename}`;
+  exportLog("native-save-start", {
+    filename,
+    path,
+    bytes: blob.size,
+    mime,
+  });
+  const base64Payload = await blobToBase64Payload(blob);
+  await filesystem.writeFile({
+    path,
+    data: base64Payload,
+    directory: "DOCUMENTS",
+    recursive: true,
+  });
+  const uriResult = await filesystem.getUri({
+    path,
+    directory: "DOCUMENTS",
+  });
+  const saved = {
+    filename,
+    path,
+    uri: uriResult?.uri || null,
+    mime,
+    bytes: blob.size,
+  };
+  saveExportRegistryEntry(saved);
+  exportLog("native-save-complete", {
+    filename,
+    path,
+    uri: saved.uri,
+    bytes: blob.size,
+  });
+  return saved;
+}
+
+async function openExportFileFromNotification(extra = {}) {
+  const filename = extra?.fileName || extra?.filename || null;
+  let fileUri = extra?.fileUri || extra?.uri || null;
+  let filePath = extra?.filePath || extra?.path || null;
+  const mime = extra?.mime || null;
+
+  if (filename && (!fileUri || !filePath)) {
+    const fromRegistry = getExportRegistryEntry(filename);
+    if (fromRegistry) {
+      fileUri = fileUri || fromRegistry.uri;
+      filePath = filePath || fromRegistry.path;
+    }
+  }
+
+  if (!fileUri && filePath) {
+    try {
+      const filesystem = window.Capacitor?.Plugins?.Filesystem;
+      if (filesystem?.getUri) {
+        const uriResult = await filesystem.getUri({
+          path: filePath,
+          directory: "DOCUMENTS",
+        });
+        fileUri = uriResult?.uri || null;
+      }
+    } catch (error) {
+      exportLog("open-from-notification-get-uri-failed", {
+        filename,
+        path: filePath,
+        error: error?.message || String(error),
+      });
+    }
+  }
+
+  if (!fileUri) {
+    exportLog("open-from-notification-missing-uri", {
+      filename,
+      path: filePath,
+    });
+    showInstantExportFeedback("Cannot open file: saved path not found.", true);
+    return false;
+  }
+
+  const fileOpener = window.Capacitor?.Plugins?.FileOpener;
+  if (fileOpener?.open) {
+    try {
+      await fileOpener.open({
+        filePath: fileUri,
+        contentType: mime || undefined,
+      });
+      exportLog("open-from-notification-file-opener", {
+        filename,
+        uri: fileUri,
+        mime,
+      });
+      return true;
+    } catch (error) {
+      exportLog("open-from-notification-file-opener-failed", {
+        filename,
+        uri: fileUri,
+        error: error?.message || String(error),
+      });
+    }
+  }
+
+  try {
+    window.open(fileUri, "_blank");
+    exportLog("open-from-notification-window", {
+      filename,
+      uri: fileUri,
+      mime,
+    });
+    return true;
+  } catch (error) {
+    exportLog("open-from-notification-window-failed", {
+      filename,
+      uri: fileUri,
+      error: error?.message || String(error),
+    });
+    showInstantExportFeedback("Unable to open file. Please use Files app.", true);
+    return false;
+  }
+}
+
+async function notifyNativeExportReady(savedFile, syncedMessage = "") {
+  if (!isNativeAppRuntime()) return { scheduled: false };
+  const localNotifications = window.Capacitor?.Plugins?.LocalNotifications;
+  if (!localNotifications?.schedule) {
+    exportLog("export-ready-notification-skipped", {
+      filename: savedFile?.filename || null,
+      reason: "local-notification-plugin-missing",
+    });
+    return { scheduled: false };
+  }
+  const permissionStatus = await localNotifications.checkPermissions();
+  if (permissionStatus?.display !== "granted") {
+    exportLog("export-ready-notification-skipped", {
+      filename: savedFile?.filename || null,
+      reason: "permission-not-granted",
+      status: permissionStatus?.display || "unknown",
+    });
+    return { scheduled: false };
+  }
+
+  // Keep export notifications on a dedicated channel with Android default sound.
+  // Do not set custom sound here, otherwise it inherits the Agnihotra bell channel.
+  if (typeof localNotifications.createChannel === "function") {
+    try {
+      await localNotifications.createChannel({
+        id: EXPORT_NOTIFICATION_CHANNEL_ID,
+        name: "Export files",
+        description: "Export completion notifications",
+        importance: 5,
+        visibility: 1,
+        vibration: true,
+      });
+      exportLog("export-ready-channel-ok", {
+        channelId: EXPORT_NOTIFICATION_CHANNEL_ID,
+        sound: "android-default",
+      });
+    } catch (error) {
+      exportLog("export-ready-channel-failed", {
+        channelId: EXPORT_NOTIFICATION_CHANNEL_ID,
+        error: error?.message || String(error),
+      });
+    }
+  }
+
+  const id = Math.floor(Date.now() % 1000000000);
+  const sentAtMs = Date.now();
+  const scheduledForMs = sentAtMs + 80;
+  const messageForUser =
+    syncedMessage || `${savedFile.filename} saved. Tap to open.`;
+  await localNotifications.schedule({
+    notifications: [
+      {
+        id,
+        title: "EternalAgni Export Ready",
+        body: messageForUser,
+        schedule: { at: new Date(scheduledForMs) },
+        ongoing: false,
+        autoCancel: true,
+        allowWhileIdle: true,
+        channelId: EXPORT_NOTIFICATION_CHANNEL_ID,
+        smallIcon: "ic_stat_notify",
+        iconColor: "#E07B26",
+        extra: {
+          tag: "agnihotra-export-file-ready",
+          sentAtMs,
+          scheduledForMs,
+          fileName: savedFile.filename,
+          filePath: savedFile.path,
+          fileUri: savedFile.uri,
+          mime: savedFile.mime,
+        },
+      },
+    ],
+  });
+  const scheduleResolvedAtMs = Date.now();
+  exportLog("export-ready-notification-sent", {
+    notificationId: id,
+    sentAtMs,
+    scheduledForMs,
+    scheduleResolvedAtMs,
+    scheduleApiLatencyMs: scheduleResolvedAtMs - sentAtMs,
+    messageForUser,
+    filename: savedFile.filename,
+    path: savedFile.path,
+    uri: savedFile.uri,
+  });
+  return {
+    scheduled: true,
+    notificationId: id,
+    sentAtMs,
+    scheduledForMs,
+  };
+}
+
+function setupExportNotificationClickHandler() {
+  if (!isNativeAppRuntime()) return;
+  if (window.__agnihotraExportNotificationHandlerBound) return;
+  const localNotifications = window.Capacitor?.Plugins?.LocalNotifications;
+  if (!localNotifications?.addListener) return;
+  window.__agnihotraExportNotificationHandlerBound = true;
+  localNotifications.addListener("localNotificationActionPerformed", async (event) => {
+    const extra = event?.notification?.extra || {};
+    if (extra?.tag !== "agnihotra-export-file-ready") return;
+    const clickedAtMs = Date.now();
+    const sentAtMs = Number(extra?.sentAtMs || 0);
+    const scheduledForMs = Number(extra?.scheduledForMs || 0);
+    const tapDelayMs = sentAtMs > 0 ? clickedAtMs - sentAtMs : null;
+    const scheduledToClickMs =
+      scheduledForMs > 0 ? clickedAtMs - scheduledForMs : null;
+    exportLog("export-ready-notification-click", {
+      actionId: event?.actionId || null,
+      clickedAtMs,
+      sentAtMs: sentAtMs || null,
+      scheduledForMs: scheduledForMs || null,
+      tapDelayMs,
+      scheduledToClickMs,
+      filename: extra?.fileName || null,
+      path: extra?.filePath || null,
+      uri: extra?.fileUri || null,
+    });
+    const name = extra?.fileName || "file";
+    const openStartMs = Date.now();
+    const opened = await openExportFileFromNotification(extra);
+    const openDurationMs = Date.now() - openStartMs;
+    exportLog("open-from-notification-latency", {
+      filename: name,
+      opened,
+      openDurationMs,
+      tapDelayMs,
+    });
+    if (!opened) {
+      showInstantExportFeedback(`Could not open ${name}.`, true);
+    }
+  });
+  localNotifications.addListener("localNotificationReceived", async (event) => {
+    const notification = event?.notification || {};
+    const extra = notification.extra || {};
+    if (extra?.tag !== "agnihotra-export-file-ready") return;
+    const notificationId = Number(notification.id || 0);
+    markExportNotificationReceived(notificationId, {
+      source: "localNotificationReceived",
+    });
+    exportLog("export-ready-notification-received", {
+      notificationId: notificationId || null,
+      receivedAtMs: Date.now(),
+      scheduledForMs: Number(extra?.scheduledForMs || 0) || null,
+      filename: extra?.fileName || null,
+    });
+  });
+  exportLog("export-ready-notification-listener-bound");
+}
+
+async function tryShareOrDownload(blob, filename, mime) {
+  let nativeSaved = null;
+  if (isNativeAppRuntime()) {
+    try {
+      nativeSaved = await saveFileInNativeStorage(blob, filename, mime);
+      if (nativeSaved) {
+        const notificationMeta = await notifyNativeExportReady(
+          nativeSaved,
+          `${filename} saved. Tap to open.`
+        );
+        return {
+          mode: "native-saved",
+          savedPath: nativeSaved.path,
+          savedUri: nativeSaved.uri,
+          notificationId: notificationMeta?.notificationId || null,
+          notificationScheduledForMs: notificationMeta?.scheduledForMs || null,
+        };
+      }
+    } catch (error) {
+      exportLog("native-save-failed", {
+        filename,
+        error: error?.message || String(error),
+      });
+    }
+  }
+
+  triggerDownload(blob, filename);
+  return { mode: "downloaded", savedPath: null, savedUri: null };
+}
+
+async function exportMonthAsPdf(
+  rows,
+  filename,
+  locationName,
+  rangeLabel
+) {
+  exportLog("pdf-start", {
+    filename,
+    locationName,
+    rangeLabel,
+    rows: rows.length,
+  });
+  const pdfExporter = window.AgnihotraPdfExport;
+  if (!pdfExporter?.exportToPdf) {
+    throw new Error("PDF exporter module unavailable.");
+  }
+  const blob = await pdfExporter.exportToPdf({
+    rows: rows.map((row) => ({
+      date: row.date,
+      sunrise: formatTimeToAMPM(row.sunrise),
+      sunset: formatTimeToAMPM(row.sunset),
+    })),
+    filename,
+    locationName,
+    rangeLabel,
+  });
+  const result = await tryShareOrDownload(blob, filename, "application/pdf");
+  exportLog("pdf-complete", {
+    filename,
+    mode: result.mode,
+    savedPath: result.savedPath,
+    savedUri: result.savedUri,
+    bytes: blob.size,
+  });
+  return result;
+}
+
+function setupScheduleExportControls() {
+  const startDateInput = document.getElementById("scheduleExportStartDate");
+  const endDateInput = document.getElementById("scheduleExportEndDate");
+  const pdfBtn = document.getElementById("exportPdfBtn");
+  const icsBtn = document.getElementById("exportIcsBtn");
+  if (!startDateInput || !endDateInput || !pdfBtn || !icsBtn) return;
+
+  const today = new Date();
+  const startOfCurrentYear = new Date(today.getFullYear(), 0, 1);
+  const oneYearFromNow = new Date(today);
+  oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
+
+  startDateInput.min = formatDateInputValue(startOfCurrentYear);
+  endDateInput.max = formatDateInputValue(oneYearFromNow);
+
+  const firstDayCurrentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const lastDayCurrentMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  startDateInput.value = formatDateInputValue(firstDayCurrentMonth);
+  endDateInput.value = formatDateInputValue(lastDayCurrentMonth);
+  endDateInput.min = startDateInput.value;
+
+  startDateInput.addEventListener("change", () => {
+    endDateInput.min = startDateInput.value || startDateInput.min;
+    if (endDateInput.value && startDateInput.value && endDateInput.value < startDateInput.value) {
+      endDateInput.value = startDateInput.value;
+    }
+  });
+
+  const setExportButtonsBusy = (busy, activeKind = "pdf") => {
+    const allButtons = [pdfBtn, icsBtn];
+    allButtons.forEach((button) => {
+      if (!button.dataset.defaultLabel) {
+        button.dataset.defaultLabel = button.textContent || "";
+      }
+      button.disabled = busy;
+      button.classList.toggle("is-busy", busy);
+      button.classList.toggle("is-idle", !busy);
+    });
+    if (!busy) {
+      allButtons.forEach((button) => {
+        button.textContent = button.dataset.defaultLabel || button.textContent;
+      });
+      return;
+    }
+    if (activeKind === "ics") {
+      icsBtn.textContent = "⏳ Generating ICS...";
+      pdfBtn.textContent = "Please wait...";
+    } else {
+      pdfBtn.textContent = "⏳ Generating PDF...";
+      icsBtn.textContent = "Please wait...";
+    }
+  };
+
+  const runExport = async (kind) => {
+    exportLog("trigger", { kind });
+    const startValue = startDateInput.value;
+    const endValue = endDateInput.value;
+    if (!startValue || !endValue) {
+      setScheduleExportStatus(
+        t("schedule.export.selectRangeError", "Please select start and end dates."),
+        true
+      );
+      return;
+    }
+
+    if (startValue < startDateInput.min) {
+      setScheduleExportStatus(
+        t(
+          "schedule.export.startMinError",
+          "Start date cannot be before January 1 of the current year."
+        ),
+        true
+      );
+      return;
+    }
+
+    if (endValue > endDateInput.max) {
+      setScheduleExportStatus(
+        t(
+          "schedule.export.endMaxError",
+          "End date cannot be beyond one year from today."
+        ),
+        true
+      );
+      return;
+    }
+
+    if (endValue < startValue) {
+      setScheduleExportStatus(
+        t("schedule.export.invalidRangeError", "End date must be on or after start date."),
+        true
+      );
+      return;
+    }
+
+    setScheduleExportStatus(t("schedule.export.generating", "Generating export..."));
+    setExportButtonsBusy(true, kind);
+    try {
+      const built = await buildRangeTimingRows(startValue, endValue);
+      if (!built?.rows?.length) {
+        setScheduleExportStatus(
+          t(
+            "schedule.export.noData",
+            "No data available. Open location timings first."
+          ),
+          true
+        );
+        return;
+      }
+      const locationName = resolveExportLocationName(built.exportLocation.locationName);
+      const safeRange = `${startValue.replace(/-/g, "")}-${endValue.replace(/-/g, "")}`;
+      const rangeLabel = `${startValue} to ${endValue}`;
+      if (kind === "ics") {
+        const filename = `agnihotra-${safeRange}.ics`;
+        const icsContent = buildIcsContent(built.rows, locationName);
+        const blob = new Blob([icsContent], { type: "text/calendar;charset=utf-8" });
+        const exportResult = await tryShareOrDownload(blob, filename, "text/calendar");
+        exportLog("ics-complete", {
+          filename,
+          mode: exportResult.mode,
+          savedPath: exportResult.savedPath,
+          savedUri: exportResult.savedUri,
+          bytes: blob.size,
+        });
+        const successMessage =
+          exportResult.mode === "native-saved"
+              ? "✅ ICS saved"
+              : `✅ ICS downloaded: ${filename}. Check your Downloads folder.`;
+        if (exportResult?.notificationId) {
+          setScheduleExportStatus("Waiting for export notification...");
+          const timeoutMs = Math.max(
+            2000,
+            Math.min(
+              7000,
+              Number(exportResult.notificationScheduledForMs || 0) - Date.now() + 4500
+            )
+          );
+          exportLog("ui-wait-notification-popup", {
+            kind: "ics",
+            notificationId: exportResult.notificationId,
+            timeoutMs,
+          });
+          const receipt = await waitForExportNotificationReceipt(
+            exportResult.notificationId,
+            timeoutMs
+          );
+          exportLog("ui-wait-notification-popup-done", {
+            kind: "ics",
+            notificationId: exportResult.notificationId,
+            ...receipt,
+          });
+          if (receipt?.received) {
+            setScheduleExportStatus(successMessage);
+            showInstantExportFeedback(successMessage);
+          } else {
+            setScheduleExportStatus("ICS generated. Waiting for notification popup.");
+          }
+        } else {
+          setScheduleExportStatus(successMessage);
+          showInstantExportFeedback(successMessage);
+        }
+      } else {
+        const filename = `agnihotra-${safeRange}.pdf`;
+        const exportResult = await exportMonthAsPdf(
+          built.rows,
+          filename,
+          locationName,
+          rangeLabel
+        );
+        const pdfMessage =
+          exportResult?.mode === "native-saved"
+            ? "✅ PDF saved"
+            : `✅ PDF ready: ${filename}. If not visible in app, check device Downloads/Files.`;
+        if (exportResult?.notificationId) {
+          setScheduleExportStatus("Waiting for export notification...");
+          const timeoutMs = Math.max(
+            2000,
+            Math.min(
+              7000,
+              Number(exportResult.notificationScheduledForMs || 0) - Date.now() + 4500
+            )
+          );
+          exportLog("ui-wait-notification-popup", {
+            kind: "pdf",
+            notificationId: exportResult.notificationId,
+            timeoutMs,
+          });
+          const receipt = await waitForExportNotificationReceipt(
+            exportResult.notificationId,
+            timeoutMs
+          );
+          exportLog("ui-wait-notification-popup-done", {
+            kind: "pdf",
+            notificationId: exportResult.notificationId,
+            ...receipt,
+          });
+          if (receipt?.received) {
+            setScheduleExportStatus(pdfMessage);
+            showInstantExportFeedback(pdfMessage);
+          } else {
+            setScheduleExportStatus("PDF generated. Waiting for notification popup.");
+          }
+        } else {
+          setScheduleExportStatus(pdfMessage);
+          showInstantExportFeedback(pdfMessage);
+        }
+      }
+    } catch (error) {
+      exportLog("failed", {
+        error: error?.message || String(error),
+        stack: error?.stack || null,
+      });
+      setScheduleExportStatus(
+        t("schedule.export.failed", "Export failed. Please try again."),
+        true
+      );
+      showInstantExportFeedback("❌ Export failed. Check logs and try again.", true);
+    } finally {
+      setExportButtonsBusy(false, kind);
+    }
+  };
+
+  pdfBtn.addEventListener("click", () => runExport("pdf"));
+  icsBtn.addEventListener("click", () => runExport("ics"));
 }
 
 function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
@@ -3208,8 +4125,10 @@ document.addEventListener("DOMContentLoaded", function () {
   initAudioPlayer('saptashloki-audio');
   initAudioPlayer('trisatya-audio');
   setupNativeAppAudioLifecycle();
+  setupExportNotificationClickHandler();
   setupMobileMenuToggle();
   setupMobileMenuOutsideClose();
+  setupScheduleExportControls();
   
   const fadeElements = document.querySelectorAll(".fade-in");
 

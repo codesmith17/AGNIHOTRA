@@ -27,6 +27,8 @@ const filesToCopy = [
     'adapters/android/notifications.adapter.js',
     'notifications.js',
     'timings-engine.js',
+    'shared/export/pdf-export.js',
+    'shared/export/ics-export.js',
     'script.js', 
     'style.css',
     'assets/images/eternalagni-icon.png',
