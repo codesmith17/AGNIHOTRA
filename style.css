@@ -508,6 +508,25 @@ body.is-offline .hero {
   box-shadow: 0 2px 6px rgba(255, 153, 51, 0.24);
 }
 
+.test-reminder-btn--secondary {
+  background: #fff5d6;
+  background: linear-gradient(45deg, #fff1c2, #ffe39b);
+  color: #3a2a00;
+  border-color: #c98d00;
+  box-shadow: 0 3px 8px rgba(201, 141, 0, 0.18);
+}
+
+.test-reminder-btn--secondary:hover {
+  box-shadow: 0 6px 14px rgba(201, 141, 0, 0.26);
+}
+
+.test-reminder-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
 .test-reminder-status {
   min-height: 18px;
   font-size: 0.78rem;

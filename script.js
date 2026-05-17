@@ -335,6 +335,7 @@ const CACHE_EXPIRY_MS = 6 * 30 * 24 * 60 * 60 * 1000; // 6 months in millisecond
 const TRANSLATION_STORAGE_KEY = "agnihotra_language";
 const DEBUG_STORAGE_KEY = "agnihotra_debug";
 const LAST_KNOWN_LOCATION_KEY = "agnihotra_last_known_location";
+const LOCATION_NAME_REFRESH_DISTANCE_KM = 3;
 const REQUIRE_MANDATORY_LOCATION_PERMISSION = true;
 const REQUIRE_MANDATORY_NOTIFICATION_PERMISSION = true;
 let translations = {};
@@ -641,6 +642,10 @@ async function continueAppInitialization() {
   if (agnihotraMainInitStarted) return;
   agnihotraMainInitStarted = true;
   window.AgnihotraNotifications?.setup();
+  // Preload the native bell on app start so .playInstant() is gapless later.
+  window.AgnihotraBell?.preload?.().catch((err) =>
+    console.warn("[AGNIHOTRA][BELL] preload-init-failed", err?.message)
+  );
   getLocation();
   updateOnlineStatus();
   loadTranslations().then(() => {
@@ -742,6 +747,74 @@ function getLastKnownLocation() {
   }
 }
 
+function haversineDistanceKm(lat1, lng1, lat2, lng2) {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return 6371 * c;
+}
+
+function getNearbyCachedLocationName(lat, lng, thresholdKm = LOCATION_NAME_REFRESH_DISTANCE_KM) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const candidates = [];
+  const lastKnown = getLastKnownLocation();
+  if (lastKnown?.locationName) {
+    candidates.push({
+      source: "last-known",
+      name: lastKnown.locationName,
+      lat: lastKnown.lat,
+      lng: lastKnown.lng,
+    });
+  }
+
+  try {
+    const cacheRaw = localStorage.getItem(CACHE_KEY);
+    if (cacheRaw) {
+      const cache = JSON.parse(cacheRaw);
+      if (
+        typeof cache?.locationName === "string" &&
+        Number.isFinite(cache?.lat) &&
+        Number.isFinite(cache?.lng)
+      ) {
+        candidates.push({
+          source: "timings-cache",
+          name: cache.locationName,
+          lat: cache.lat,
+          lng: cache.lng,
+        });
+      }
+    }
+  } catch (_) {}
+
+  let best = null;
+  for (const candidate of candidates) {
+    const distanceKm = haversineDistanceKm(lat, lng, candidate.lat, candidate.lng);
+    if (distanceKm <= thresholdKm && (!best || distanceKm < best.distanceKm)) {
+      best = { ...candidate, distanceKm };
+    }
+  }
+
+  if (best) {
+    locationLog("location-name-cache-hit", {
+      source: best.source,
+      distanceKm: Number(best.distanceKm.toFixed(3)),
+      thresholdKm,
+    });
+    return best.name;
+  }
+
+  locationLog("location-name-cache-miss", { thresholdKm });
+  return null;
+}
+
 let preciseLocationRetryInFlight = false;
 
 function retryPreciseLocationInBackground(reason = "unknown") {
@@ -762,9 +835,8 @@ function retryPreciseLocationInBackground(reason = "unknown") {
         elapsedMs: Math.round(performance.now() - startedAt)
       });
 
-      document.getElementById(
-        "userLocation"
-      ).innerText = `Your Location: Latitude ${latitude}, Longitude ${longitude}`;
+      document.getElementById("userLocation").innerText =
+        "Your Location: Detecting nearby place...";
       saveLastKnownLocation(latitude, longitude);
 
       const timingsPromise = getSunriseSunset(latitude, longitude);
@@ -1061,9 +1133,9 @@ async function runQuickReminderTest() {
       });
       setTestReminderStatus("Test notification triggered.");
     } else {
-      playBellTone(3, 0.32, 450);
+      window.AgnihotraBell?.playTriple?.("test-reminder-web");
       console.log("[AGNIHOTRA][ALERT] test-reminder-trigger-web", {
-        mode: "in-app-bell",
+        mode: "native-audio-3x",
       });
       setTestReminderStatus("Test bell triggered.");
     }
@@ -1154,17 +1226,133 @@ function setupLanguageToggle() {
 function setupTestReminderButton() {
   const wrap = document.querySelector(".test-reminder-wrap");
   const button = document.getElementById("testReminderBtn");
-  if (!button) return;
+  const mockBtn = document.getElementById("mockCountdownBtn");
+  if (!button && !mockBtn) return;
   if (!isTestReminderEnabled()) {
     if (wrap) wrap.style.display = "none";
     return;
   }
   if (wrap) wrap.style.display = "";
   updateTestReminderButtonCopy();
-  button.addEventListener("click", () => {
+  if (button) {
+    button.addEventListener("click", () => {
+      initAudio();
+      runQuickReminderTest();
+    });
+  }
+  if (mockBtn) {
+    mockBtn.addEventListener("click", () => {
+      initAudio();
+      runMockWindowOpenTest(10);
+    });
+  }
+}
+
+let mockCountdownIntervalId = null;
+let mockCountdownTimeoutId = null;
+
+function setMockCountdownStatus(message) {
+  const status = document.getElementById("mockCountdownStatus");
+  if (status) status.textContent = message || "";
+}
+
+function clearMockCountdownTimers() {
+  if (mockCountdownIntervalId) {
+    clearInterval(mockCountdownIntervalId);
+    mockCountdownIntervalId = null;
+  }
+  if (mockCountdownTimeoutId) {
+    clearTimeout(mockCountdownTimeoutId);
+    mockCountdownTimeoutId = null;
+  }
+}
+
+function ringSingleBellInstant(reason = "ting") {
+  // Primary + only path: @capacitor-community/native-audio (SoundPool on
+  // Android — gapless, no autoplay gating, no HTMLAudio lag). Falls back to
+  // HTMLAudio internally if the plugin is unavailable.
+  if (window.AgnihotraBell && typeof window.AgnihotraBell.playInstant === "function") {
+    return window.AgnihotraBell.playInstant(reason);
+  }
+  console.warn("[AGNIHOTRA][BELL] helper-missing", { reason });
+  return false;
+}
+
+function runMockWindowOpenTest(seconds = 10) {
+  clearMockCountdownTimers();
+  const safeSeconds = Math.max(1, Number(seconds) || 10);
+  const startedAt = Date.now();
+  let secondsLeft = safeSeconds;
+  const template = t(
+    "notifications.mockCountdown",
+    "Mock window opens in {{seconds}}s..."
+  );
+
+  // Make absolutely sure audio is unlocked by the current gesture.
+  try {
     initAudio();
-    runQuickReminderTest();
+  } catch (err) {
+    console.warn("[AGNIHOTRA][MOCK] initAudio-threw", { message: err?.message });
+  }
+
+  console.log("[AGNIHOTRA][MOCK] tap", {
+    seconds: safeSeconds,
+    runtime: isNativeAppRuntime() ? "native" : "web",
+    visibility:
+      typeof document !== "undefined" ? document.visibilityState : "n/a",
+    audioCtxState: audioCtx?.state || "none",
+    bellReady: window.AgnihotraBell?.isReady?.() ?? "n/a",
   });
+
+  setMockCountdownStatus(
+    interpolateTemplate(template, { seconds: secondsLeft })
+  );
+
+  mockCountdownIntervalId = setInterval(() => {
+    secondsLeft -= 1;
+    console.log("[AGNIHOTRA][MOCK] tick", {
+      secondsLeft,
+      elapsedMs: Date.now() - startedAt,
+      visibility: document.visibilityState,
+      bellReady: window.AgnihotraBell?.isReady?.() ?? "n/a",
+    });
+    if (secondsLeft <= 0) {
+      if (mockCountdownIntervalId) {
+        clearInterval(mockCountdownIntervalId);
+        mockCountdownIntervalId = null;
+      }
+      setMockCountdownStatus(
+        interpolateTemplate(template, { seconds: 0 })
+      );
+      return;
+    }
+    setMockCountdownStatus(
+      interpolateTemplate(template, { seconds: secondsLeft })
+    );
+  }, 1000);
+
+  mockCountdownTimeoutId = setTimeout(() => {
+    const isForeground =
+      typeof document !== "undefined" &&
+      document.visibilityState === "visible";
+    console.log("[AGNIHOTRA][MOCK] zero-mark-fire", {
+      elapsedMs: Date.now() - startedAt,
+      visibility: document.visibilityState,
+      bellReady: window.AgnihotraBell?.isReady?.() ?? "n/a",
+      willRing: isForeground,
+    });
+    if (isForeground) {
+      ringSingleBellInstant("mock-zero-mark");
+      setMockCountdownStatus("Mock window opened — single bell ting.");
+    } else {
+      // App is backgrounded/closed: never ring the single ting.
+      setMockCountdownStatus("App not foreground — single ting skipped.");
+      console.log("[AGNIHOTRA][ALERT] mock-window-open-skip", {
+        reason: "app-not-foreground",
+      });
+    }
+    clearMockCountdownTimers();
+  }, safeSeconds * 1000);
 }
 
 function refreshUpcomingEvents() {
@@ -1820,16 +2008,15 @@ window.playedAlerts = window.playedAlerts || new Set();
 const PRE_ALERT_MINUTES = 10;
 const ALERT_WINDOW_MS = 10000; // Trigger if app checks within 10s of target
 
-// Persistent AudioContext to be initialized on user gesture
+// Persistent AudioContext to be initialized on user gesture. Unlocking it
+// also lets the @capacitor-community/native-audio plugin play immediately on
+// browsers that gate HTMLAudio behind a user interaction.
 let audioCtx = null;
-let bellSound = null;
 let wakeLockSentinel = null;
 let wakeLockMonitorInterval = null;
-const activeBellPlayers = new Set();
 let testReminderTimeoutId = null;
 let testReminderCountdownIntervalId = null;
 
-// Function to initialize or resume AudioContext on user gesture
 function initAudio() {
   if (!audioCtx) {
     const AudioContext = window.AudioContext || window['webkitAudioContext'];
@@ -1840,112 +2027,12 @@ function initAudio() {
   if (audioCtx && audioCtx.state === "suspended") {
     audioCtx.resume();
   }
-
-  // Pre-load the bell sound MP3
-  if (!bellSound) {
-    bellSound = new Audio('assets/audio/alerts/agnihotra-bell.mp3');
-    bellSound.volume = 0.35;
-    bellSound.load();
-  }
 }
 
 // Unlock audio on common user interactions
 ["click", "touchstart", "mousedown", "keydown"].forEach((event) => {
   window.addEventListener(event, initAudio, { once: true });
 });
-
-
-/**
- * DEBUG / TESTING FUNCTION
- * Run window.testBell() in the browser console to set a test countdown
- * that will trigger the bell tone in 5 seconds.
- */
-window.testBell = function() {
-  console.log("Setting up test countdown for 5 seconds from now...");
-  initAudio(); // Ensure audio is initialized
-  
-  const testTime = Date.now() + 5000; // 5 seconds from now
-  const upcomingElement = document.getElementById("upcomingTimes");
-  
-  if (upcomingElement) {
-    // Add a test item to the UI
-    const itemDiv = document.createElement("div");
-    itemDiv.className = "time-item test-item";
-    itemDiv.style.border = "2px dashed #FF4500";
-    itemDiv.style.padding = "10px";
-    itemDiv.style.margin = "10px 0";
-    
-    itemDiv.innerHTML = `
-        <span class="time-label"><i class="fas fa-flask" style="color: #FF4500;"></i> TEST EVENT</span>
-        <span id="testCountdown" class="countdown-value">--h --m --s</span>
-        <span class="time-secondary">Triggering soon...</span>
-    `;
-    
-    upcomingElement.prepend(itemDiv);
-    
-    // Track this test event
-    window.activeCountdowns["test"] = testTime;
-    console.log("Test countdown started. Please keep this tab visible!");
-  } else {
-    console.error("Could not find #upcomingTimes element. Make sure location is detected first.");
-  }
-};
-
-// Function to play a bell tone using the MP3 file
-function playBellTone(repeatCount = 1, volume = 0.35, gapMs = 450) {
-  // Only play if the user is active on the page (tab is visible)
-  if (document.visibilityState !== "visible") return;
-
-  const totalPlays = Math.max(1, Number(repeatCount) || 1);
-
-  try {
-    let playCount = 0;
-
-    const playNext = () => {
-      if (playCount >= totalPlays) {
-        return;
-      }
-
-      const currentBell = new Audio('assets/audio/alerts/agnihotra-bell.mp3');
-      currentBell.volume = Math.max(0.05, Math.min(1, volume));
-      currentBell.loop = false;
-      activeBellPlayers.add(currentBell);
-
-      const cleanupBell = () => {
-        activeBellPlayers.delete(currentBell);
-      };
-      currentBell.addEventListener('ended', cleanupBell, { once: true });
-      currentBell.addEventListener('pause', () => {
-        if (currentBell.ended || currentBell.currentTime === 0) {
-          cleanupBell();
-        }
-      });
-
-      const playPromise = currentBell.play();
-      if (playPromise !== undefined) {
-        playPromise.catch((error) => {
-          console.warn("Audio playback failed:", error);
-          cleanupBell();
-        });
-      }
-
-      playCount++;
-      if (playCount < totalPlays) {
-        currentBell.addEventListener(
-          'ended',
-          () => {
-            setTimeout(playNext, gapMs);
-          },
-          { once: true }
-        );
-      }
-    };
-
-    playNext();
-  } catch (e) {
-    console.warn("Audio playback failed:", e);
-  }
-}
 
 async function requestScreenWakeLock(forceReacquire = false) {
   if (!('wakeLock' in navigator)) return false;
@@ -2067,17 +2154,31 @@ function updateCountdown(type, targetTime) {
   if (!window.playedAlerts.has(preAlertKey)) {
     const preAlertDelta = currentTime - preAlertTime;
     if (preAlertDelta >= 0 && preAlertDelta <= ALERT_WINDOW_MS) {
+      // Native: the OS notification scheduled via Capacitor fires with the
+      // channel sound (3x bell) automatically, both in foreground AND when the
+      // app is closed. We do NOT play another bell from JS to avoid doubling.
+      // Web: there's no scheduled OS notification, so we ring the 3x bell via
+      // NativeAudio (HTMLAudio fallback) when the page is visible.
       if (!nativeRuntime) {
-        const reminderCopy = getReminderNotificationCopy(
-          eventLabel,
-          PRE_ALERT_MINUTES
-        );
-        window.AgnihotraNotifications?.show(
-          reminderCopy.title,
-          reminderCopy.body,
-          preAlertKey
-        );
-        playBellTone(3, 0.32, 450);
+        const isForeground =
+          typeof document !== "undefined" &&
+          document.visibilityState === "visible";
+        if (isForeground) {
+          const reminderCopy = getReminderNotificationCopy(
+            eventLabel,
+            PRE_ALERT_MINUTES
+          );
+          window.AgnihotraNotifications?.show(
+            reminderCopy.title,
+            reminderCopy.body,
+            preAlertKey
+          );
+          window.AgnihotraBell?.playTriple?.("pre-alert-web");
+          console.log("[AGNIHOTRA][ALERT] pre-alert-web", {
+            tag: preAlertKey,
+            mode: "native-audio-3x",
+          });
+        }
       } else {
         console.log("[AGNIHOTRA][ALERT] pre-alert-native", {
           tag: preAlertKey,
@@ -2093,22 +2194,23 @@ function updateCountdown(type, targetTime) {
   if (!window.playedAlerts.has(mainAlertKey)) {
     const mainAlertDelta = currentTime - targetTime;
     if (mainAlertDelta >= 0 && mainAlertDelta <= ALERT_WINDOW_MS) {
-      if (nativeRuntime) {
-        console.log("[AGNIHOTRA][ALERT] main-alert-native", {
+      // Single bell "ting" the moment the agnihotra window opens.
+      // Foreground-only: never raise an OS notification here, never play
+      // when the app is closed/backgrounded.
+      const isForeground =
+        typeof document !== "undefined" &&
+        document.visibilityState === "visible";
+      if (isForeground) {
+        ringSingleBellInstant("window-open");
+        console.log("[AGNIHOTRA][ALERT] window-open-ting", {
           tag: mainAlertKey,
-          mode: "scheduled-notification-channel-sound-only",
+          runtime: nativeRuntime ? "native-foreground" : "web-foreground",
+          mode: "single-bell-ting",
         });
       } else {
-        const nowCopy = getNowNotificationCopy(eventLabel);
-        window.AgnihotraNotifications?.show(
-          nowCopy.title,
-          nowCopy.body,
-          mainAlertKey
-        );
-        playBellTone(3, 0.32, 450);
-        console.log("[AGNIHOTRA][ALERT] main-alert-web", {
+        console.log("[AGNIHOTRA][ALERT] window-open-skip", {
           tag: mainAlertKey,
-          mode: "in-app-bell",
+          reason: "app-not-foreground",
         });
       }
       window.playedAlerts.add(mainAlertKey);
@@ -2159,9 +2261,7 @@ async function getLocation() {
   // Immediate bootstrap for reload reliability: show last known location/timings first.
   const lastKnown = getLastKnownLocation();
   if (lastKnown) {
-    const fastLocationText =
-      lastKnown.locationName ||
-      `${lastKnown.lat.toFixed(6)}, ${lastKnown.lng.toFixed(6)}`;
+    const fastLocationText = lastKnown.locationName || "Saved nearby place";
     document.getElementById("userLocation").innerText = `Your Location: ${fastLocationText}`;
     debugLog("location:last-known-bootstrap", {
       lat: lastKnown.lat,
@@ -2187,9 +2287,8 @@ async function getLocation() {
           elapsedMs: Math.round(performance.now() - startedAt)
         });
 
-        document.getElementById(
-          "userLocation"
-        ).innerText = `Your Location: Latitude ${latitude}, Longitude ${longitude}`;
+        document.getElementById("userLocation").innerText =
+          "Your Location: Detecting nearby place...";
         saveLastKnownLocation(latitude, longitude);
         // Prioritize timing visibility first; resolve readable address in parallel.
         const timingsPromise = getSunriseSunset(latitude, longitude);
@@ -2213,9 +2312,8 @@ async function getLocation() {
         if (error?.code !== 1) {
           const recovered = await tryImmediatePreciseLocationRecovery();
           if (recovered) {
-            document.getElementById(
-              "userLocation"
-            ).innerText = `Your Location: Latitude ${recovered.latitude}, Longitude ${recovered.longitude}`;
+            document.getElementById("userLocation").innerText =
+              "Your Location: Detecting nearby place...";
             saveLastKnownLocation(recovered.latitude, recovered.longitude);
 
             const timingsPromise = getSunriseSunset(recovered.latitude, recovered.longitude);
@@ -2264,13 +2362,32 @@ async function reverseGeocode(latitude, longitude, skipTimingFetch = false) {
   const startedAt = performance.now();
   debugLog("reverse-geocode:start", { skipTimingFetch });
   try {
+    // Reuse cached place name if location drift is below threshold.
+    const cachedLocationName = getNearbyCachedLocationName(latitude, longitude);
+    if (cachedLocationName) {
+      document.getElementById("userLocation").innerHTML = `
+        <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Detected Address:</span>
+        <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">${cachedLocationName}</span>
+      `;
+      saveLastKnownLocation(latitude, longitude, cachedLocationName);
+      if (!skipTimingFetch) {
+        await getSunriseSunset(latitude, longitude, cachedLocationName);
+      }
+      setLocationLoading(false);
+      locationLog("source-location-name-cache", {
+        elapsedMs: Math.round(performance.now() - startedAt),
+        thresholdKm: LOCATION_NAME_REFRESH_DISTANCE_KM,
+      });
+      return;
+    }
+
     // If offline, skip API calls and use cached data
     if (!navigator.onLine) {
       // Try to get cached location name
       const cache = getValidCachedData(latitude, longitude);
       const locationDisplay = cache && cache.locationName 
         ? cache.locationName 
-        : `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+        : "Nearby place";
       
       document.getElementById("userLocation").innerHTML = `
         <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Offline Mode:</span>
@@ -2351,12 +2468,9 @@ async function reverseGeocode(latitude, longitude, skipTimingFetch = false) {
       }
     }
   } catch (error) {
-    // Fall back to coordinates display
-    document.getElementById(
-      "userLocation"
-    ).innerText = `Your Location: ${latitude.toFixed(6)}, ${longitude.toFixed(
-      6
-    )}`;
+    // Fall back to generic location label (no coordinates in UI)
+    document.getElementById("userLocation").innerText =
+      "Your Location: Nearby place";
     if (!skipTimingFetch) {
       await getSunriseSunset(latitude, longitude);
     }
@@ -2376,12 +2490,27 @@ async function reverseGeocodeApproximate(latitude, longitude, skipTimingFetch = 
   const startedAt = performance.now();
   debugLog("reverse-geocode-approx:start", { skipTimingFetch });
   try {
+    const cachedLocationName = getNearbyCachedLocationName(latitude, longitude);
+    if (cachedLocationName) {
+      document.getElementById("userLocation").innerText = `Your Location: ${cachedLocationName}`;
+      saveLastKnownLocation(latitude, longitude, cachedLocationName);
+      if (!skipTimingFetch) {
+        await getSunriseSunset(latitude, longitude, cachedLocationName);
+      }
+      setLocationLoading(false);
+      locationLog("source-ip-location-name-cache", {
+        elapsedMs: Math.round(performance.now() - startedAt),
+        thresholdKm: LOCATION_NAME_REFRESH_DISTANCE_KM,
+      });
+      return;
+    }
+
     // If offline, skip API call
     if (!navigator.onLine) {
       const cache = getValidCachedData(latitude, longitude);
       const locationDisplay = cache && cache.locationName 
         ? `${cache.locationName}` 
-        : `${latitude.toFixed(2)}, ${longitude.toFixed(2)}`;
+        : "Nearby place";
       
       document.getElementById(
         "userLocation"
@@ -2427,12 +2556,9 @@ async function reverseGeocodeApproximate(latitude, longitude, skipTimingFetch = 
         elapsedMs: Math.round(performance.now() - startedAt)
       });
     } else {
-      // Fall back to coordinates display
-      document.getElementById(
-        "userLocation"
-      ).innerText = `Your Location: ${latitude.toFixed(2)}, ${longitude.toFixed(
-        2
-      )}`;
+      // Fall back to generic location label (no coordinates in UI)
+      document.getElementById("userLocation").innerText =
+        "Your Location: Nearby place";
       saveLastKnownLocation(latitude, longitude);
       if (!skipTimingFetch) {
         await getSunriseSunset(latitude, longitude);
@@ -2445,12 +2571,9 @@ async function reverseGeocodeApproximate(latitude, longitude, skipTimingFetch = 
       });
     }
   } catch (error) {
-    // Fall back to coordinates display but continue with sunrise/sunset
-    document.getElementById(
-      "userLocation"
-    ).innerText = `Your Location: ${latitude.toFixed(2)}, ${longitude.toFixed(
-      2
-    )}`;
+    // Fall back to generic location label (no coordinates in UI)
+    document.getElementById("userLocation").innerText =
+      "Your Location: Nearby place";
     saveLastKnownLocation(latitude, longitude);
     if (!skipTimingFetch) {
       await getSunriseSunset(latitude, longitude);
@@ -2528,11 +2651,8 @@ async function getApproximateLocation() {
 
     if (coordinates) {
       // Update location text to show we're identifying the place
-      document.getElementById(
-        "userLocation"
-      ).innerText = `Identifying location... (${coordinates.lat.toFixed(
-        2
-      )}, ${coordinates.lng.toFixed(2)})`;
+      document.getElementById("userLocation").innerText =
+        "Identifying nearby place...";
 
       // Use the same reverse geocoding function to identify the place
       const timingsPromise = getSunriseSunset(coordinates.lat, coordinates.lng);

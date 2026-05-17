@@ -1,4 +1,4 @@
-const CACHE_NAME = 'agnihotra-cache-v24';
+const CACHE_NAME = 'agnihotra-cache-v26';
 
 // Critical assets to cache on install
 const CRITICAL_ASSETS = [
@@ -19,7 +19,8 @@ const CRITICAL_ASSETS = [
 
 // Assets to cache on-demand (as they're fetched)
 const CACHEABLE_RESOURCES = [
-  '/assets/audio/alerts/agnihotra-bell.mp3',
+  '/assets/audio/alerts/agnihotra-single-bell.mp3',
+  '/assets/audio/alerts/agnihotra-bell-3x.mp3',
   '/assets/audio/mantras/sunrise-mantra.mpeg',
   '/assets/audio/mantras/sunset-mantra.mpeg',
   '/assets/audio/mantras/panchasheel-pratidnya.mpeg',

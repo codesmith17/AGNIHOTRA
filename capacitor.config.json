@@ -1,5 +1,12 @@
 {
   "appId": "com.eternalagni.app",
   "appName": "EternalAgni",
-  "webDir": "public"
+  "webDir": "public",
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_notify",
+      "iconColor": "#E07B26",
+      "sound": "agnihotra_bell_3x"
+    }
+  }
 }

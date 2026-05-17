@@ -2,6 +2,17 @@
   const shared = window.AgnihotraNotificationShared;
   const REMINDER_CATCHUP_DELAY_MS = 3000;
 
+  // Serialize schedule/cancel operations so concurrent callers can't create
+  // duplicate notifications (cache-hit path + fast path + background 3-month).
+  let schedulingMutex = Promise.resolve();
+  function runExclusively(taskFn) {
+    const next = schedulingMutex.then(() => taskFn()).catch((error) => {
+      console.warn("Scheduling task failed:", error);
+    });
+    schedulingMutex = next;
+    return next;
+  }
+
   function logNotify(message, meta = {}) {
     let serialized = "";
     try {
@@ -103,6 +114,8 @@
             channelId: shared.CAPACITOR_CHANNEL_ID,
             group: shared.CAPACITOR_NOTIFICATION_GROUP,
             sound: shared.CAPACITOR_NOTIFICATION_SOUND,
+            smallIcon: "ic_stat_notify",
+            iconColor: "#E07B26",
             extra: { tag },
           },
         ],
@@ -113,90 +126,103 @@
   }
 
   async function scheduleUpcomingReminders(events, options = 10) {
-    const localNotifications = shared.getCapacitorLocalNotifications();
-    if (!shared.isCapacitorNativeRuntime() || !localNotifications) return;
+    return runExclusively(async () => {
+      const localNotifications = shared.getCapacitorLocalNotifications();
+      if (!shared.isCapacitorNativeRuntime() || !localNotifications) return;
 
-    const granted = await requestCapacitorPermission();
-    if (!granted || !Array.isArray(events) || events.length === 0) return;
-    await ensureCapacitorChannel();
+      const granted = await requestCapacitorPermission();
+      if (!granted || !Array.isArray(events) || events.length === 0) return;
+      await ensureCapacitorChannel();
 
-    const now = Date.now();
-    const leadMinutes =
-      typeof options === "number"
-        ? options
-        : Number(options?.leadMinutes || 10);
-    const replaceExisting =
-      typeof options === "object" ? options?.replaceExisting !== false : true;
-    const reminderLeadMs = leadMinutes * 60 * 1000;
+      const now = Date.now();
+      const leadMinutes =
+        typeof options === "number"
+          ? options
+          : Number(options?.leadMinutes || 10);
+      const replaceExisting =
+        typeof options === "object" ? options?.replaceExisting !== false : true;
+      const reminderLeadMs = leadMinutes * 60 * 1000;
 
-    if (replaceExisting) {
-      try {
-        const pending = await localNotifications.getPending();
-        const reminderIds = (pending.notifications || [])
-          .filter(
-            (n) =>
-              n?.group === shared.CAPACITOR_NOTIFICATION_GROUP ||
-              String(n?.extra?.tag || "").includes("native-reminder")
-          )
-          .map((n) => ({ id: n.id }));
-        if (reminderIds.length > 0) {
-          await localNotifications.cancel({ notifications: reminderIds });
+      if (replaceExisting) {
+        try {
+          const pending = await localNotifications.getPending();
+          const reminderIds = (pending.notifications || [])
+            .filter((n) => {
+              const tagStr = String(n?.extra?.tag || "");
+              return (
+                n?.group === shared.CAPACITOR_NOTIFICATION_GROUP ||
+                tagStr.includes("native-reminder") ||
+                tagStr.includes("agnihotra")
+              );
+            })
+            .map((n) => ({ id: n.id }));
+          if (reminderIds.length > 0) {
+            logNotify("cancel-previous-native", { count: reminderIds.length });
+            await localNotifications.cancel({ notifications: reminderIds });
+          }
+        } catch (error) {
+          console.warn("Unable to clear previous native reminders:", error);
         }
-      } catch (error) {
-        console.warn("Unable to clear previous native reminders:", error);
       }
-    }
 
-    const notifications = events
-      .flatMap((event) => {
-        const reminderAt = Number(event.time) - reminderLeadMs;
-        if (!Number.isFinite(reminderAt)) return [];
-        const eventTime = Number(event.time);
-        if (!Number.isFinite(eventTime)) return [];
+      const seenIds = new Set();
+      const notifications = events
+        .flatMap((event) => {
+          const reminderAt = Number(event.time) - reminderLeadMs;
+          if (!Number.isFinite(reminderAt)) return [];
+          const eventTime = Number(event.time);
+          if (!Number.isFinite(eventTime)) return [];
 
-        const missedReminderButEventUpcoming =
-          reminderAt <= now + 5000 && eventTime > now + 15000;
-        if (reminderAt <= now + 5000 && !missedReminderButEventUpcoming) return [];
+          const missedReminderButEventUpcoming =
+            reminderAt <= now + 5000 && eventTime > now + 15000;
+          if (reminderAt <= now + 5000 && !missedReminderButEventUpcoming) return [];
 
-        const firstFireAt = missedReminderButEventUpcoming
-          ? now + REMINDER_CATCHUP_DELAY_MS
-          : reminderAt;
-        const tag = `native-reminder-${event.id}-${event.time}-pre${leadMinutes}`;
-        return {
-          id: shared.toCapacitorNotificationId(tag),
-          title: event.reminderTitle || "Agnihotra reminder",
-          body:
-            event.reminderBody || `${event.label} starts in ${leadMinutes} minutes.`,
-          schedule: {
-            at: new Date(firstFireAt),
-            allowWhileIdle: true,
-          },
+          const firstFireAt = missedReminderButEventUpcoming
+            ? now + REMINDER_CATCHUP_DELAY_MS
+            : reminderAt;
+          const tag = `native-reminder-${event.id}-${event.time}-pre${leadMinutes}`;
+          const id = shared.toCapacitorNotificationId(tag);
+          if (seenIds.has(id)) return [];
+          seenIds.add(id);
+          return {
+            id,
+            title: event.reminderTitle || "Agnihotra reminder",
+            body:
+              event.reminderBody ||
+              `${event.label} starts in ${leadMinutes} minutes.`,
+            schedule: {
+              at: new Date(firstFireAt),
+              allowWhileIdle: true,
+            },
+            channelId: shared.CAPACITOR_CHANNEL_ID,
+            group: shared.CAPACITOR_NOTIFICATION_GROUP,
+            sound: shared.CAPACITOR_NOTIFICATION_SOUND,
+            smallIcon: "ic_stat_notify",
+            iconColor: "#E07B26",
+            extra: {
+              tag,
+              eventId: event.id,
+              eventTime,
+              catchUp: missedReminderButEventUpcoming,
+            },
+          };
+        })
+        .filter(Boolean);
+
+      if (notifications.length === 0) return;
+
+      try {
+        logNotify("schedule-upcoming-native", {
+          count: notifications.length,
           channelId: shared.CAPACITOR_CHANNEL_ID,
-          group: shared.CAPACITOR_NOTIFICATION_GROUP,
           sound: shared.CAPACITOR_NOTIFICATION_SOUND,
-          extra: {
-            tag,
-            eventId: event.id,
-            eventTime,
-            catchUp: missedReminderButEventUpcoming,
-          },
-        };
-      })
-      .filter(Boolean);
-
-    if (notifications.length === 0) return;
-
-    try {
-      logNotify("schedule-upcoming-native", {
-        count: notifications.length,
-        channelId: shared.CAPACITOR_CHANNEL_ID,
-        sound: shared.CAPACITOR_NOTIFICATION_SOUND,
-        firstTag: notifications[0]?.extra?.tag || null,
-      });
-      await localNotifications.schedule({ notifications });
-    } catch (error) {
-      console.warn("Failed to schedule native reminders:", error);
-    }
+          firstTag: notifications[0]?.extra?.tag || null,
+        });
+        await localNotifications.schedule({ notifications });
+      } catch (error) {
+        console.warn("Failed to schedule native reminders:", error);
+      }
+    });
   }
 
   async function scheduleTestReminder({
@@ -224,6 +250,8 @@
         channelId: shared.CAPACITOR_CHANNEL_ID,
         group: shared.CAPACITOR_NOTIFICATION_GROUP,
         sound: shared.CAPACITOR_NOTIFICATION_SOUND,
+        smallIcon: "ic_stat_notify",
+        iconColor: "#E07B26",
         extra: { tag },
       };
       logNotify("schedule-test-native", {
