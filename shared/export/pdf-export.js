@@ -1,32 +1,30 @@
 (() => {
   const PAGE_TIPS = [
-    "Offer exactly at sunrise/sunset.",
-    "Use cow dung cakes, ghee & whole rice.",
-    "Keep mantra chanting calm and focused.",
-    "Prepare materials at least 10 minutes earlier.",
-    "Sit with gratitude and steady breath.",
+    "Use the listed local sunrise/sunset time.",
+    "Confirm your location before exporting.",
+    "Keep your device clock accurate.",
+    "Follow your teacher/tradition for ritual details.",
   ];
 
   const PDF_TEXTS = {
     locationLabel: "Location",
     rangeLabel: "Range",
     generatedLabel: "Generated",
-    mantraLine: "Om Suryaya Swaha, Prajapataye Swaha",
     coverTitle: "Agnihotra Sunrise & Sunset Timings",
-    coverSubTitle: "Sacred Rhythm for Daily Practice",
+    coverSubTitle: "GPS-Based Local Timing Schedule",
     coverDescription:
-      "Use this handbook for exact sunrise/sunset offerings, monthly planning, and consistent sadhana discipline.",
+      "Timings are generated from the selected coordinates using the Agnihotra definition: centre of the solar disc on the horizon.",
     coverDescription2:
-      "Includes complete material guide, monthly ritual timings, and spiritual practice notes.",
+      "Reference sources for timing definition, mantras, and common materials are listed in this PDF.",
     scanLabel: "Scan for app/site",
-    prepTitle: "Preparation Discipline",
+    prepTitle: "Before the Exact Time",
     prepLine1:
-      "Prepare all materials at least 10 minutes in advance and keep your ritual place clean.",
+      "Prepare the fire and offerings before the listed sunrise/sunset time.",
     prepLine2:
-      "Perform exactly at listed sunrise/sunset and sit silently for a few minutes after offering.",
+      "Use the local time shown in this schedule for your selected coordinates.",
     prepLine3:
-      "Keep mantra pronunciation steady and your intention peaceful throughout the ritual.",
-    ingredientsTitle: "Ingredients & Sacred Materials",
+      "Follow your teacher, family tradition, or trusted Homa Therapy instructions for ritual details.",
+    ingredientsTitle: "Ingredients & Common Materials",
     offeringsLabel: "Offerings",
     setupLabel: "Vessel & Setup",
     mantraPrepLabel: "Mantra Preparation",
@@ -34,33 +32,47 @@
     timingRuleTitle: "Exact Timing Rule",
     timingRuleLine: "Do not perform before/after exact time.",
     timingRuleDesc:
-      "The offering must happen exactly at sunrise and sunset as listed in this schedule.",
+      "Homatherapy/Homa Therapy define Agnihotra sunrise/sunset as the middle of the solar disc at the horizon.",
     coreMantrasTitle: "Core Mantras",
     tableDate: "Date",
     tableSunrise: "Sunrise",
     tableSunset: "Sunset",
-    reflectionTitle: "Traditional Benefits of Agnihotra",
   };
+
+  let qrDataUrlCache = null;
+  let qrDataUrlInFlight = null;
 
   async function ensureJsPdfReady() {
     if (window.jspdf?.jsPDF) return window.jspdf.jsPDF;
-    const cdnUrls = [
-      "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
-      "https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js",
-    ];
-    for (const url of cdnUrls) {
-      try {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement("script");
-          script.src = url;
-          script.async = true;
-          script.onload = resolve;
-          script.onerror = reject;
-          document.head.appendChild(script);
-        });
-        if (window.jspdf?.jsPDF) return window.jspdf.jsPDF;
-      } catch (_) {}
-    }
+    const localPath = "vendor/jspdf.umd.min.js";
+    try {
+      await new Promise((resolve, reject) => {
+        const existing = document.querySelector(
+          `script[src="${localPath}"], script[src$="/${localPath}"]`
+        );
+        if (existing) {
+          if (window.jspdf?.jsPDF) {
+            resolve();
+          } else {
+            existing.addEventListener("load", resolve, { once: true });
+            existing.addEventListener(
+              "error",
+              () => reject(new Error("local-jspdf-load-failed")),
+              { once: true }
+            );
+          }
+          return;
+        }
+
+        const script = document.createElement("script");
+        script.src = localPath;
+        script.async = true;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error("local-jspdf-load-failed"));
+        document.head.appendChild(script);
+      });
+      if (window.jspdf?.jsPDF) return window.jspdf.jsPDF;
+    } catch (_) {}
     return null;
   }
 
@@ -93,17 +105,31 @@
   }
 
   async function loadQrCodeDataUrl(targetUrl) {
+    if (qrDataUrlCache) return qrDataUrlCache;
+    if (qrDataUrlInFlight) return qrDataUrlInFlight;
+
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return null;
+    }
+
     const url = String(targetUrl || "").trim();
     if (!url) return null;
     const qrApi = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(url)}`;
-    try {
-      const response = await fetch(qrApi);
-      if (!response.ok) return null;
-      const blob = await response.blob();
-      return await blobToDataUrl(blob);
-    } catch (_) {
-      return null;
-    }
+    qrDataUrlInFlight = (async () => {
+      try {
+        const response = await fetch(qrApi);
+        if (!response.ok) return null;
+        const blob = await response.blob();
+        const dataUrl = await blobToDataUrl(blob);
+        if (dataUrl) qrDataUrlCache = dataUrl;
+        return dataUrl;
+      } catch (_) {
+        return null;
+      } finally {
+        qrDataUrlInFlight = null;
+      }
+    })();
+    return qrDataUrlInFlight;
   }
 
   function parseDateInputToDate(value) {
@@ -235,7 +261,6 @@
     doc.text(`${pdfText.rangeLabel}: ${meta.rangeLabel}`, 42, 152);
     doc.setFont("helvetica", "normal");
     doc.text(`${pdfText.generatedLabel}: ${meta.generatedAt}`, 42, 168);
-    doc.text(pdfText.mantraLine, pageWidth - 242, 168);
   }
 
   function drawCoverPage(doc, meta, pageWidth, pageHeight, assets, pdfText) {
@@ -303,6 +328,16 @@
       { maxWidth: pageWidth - 120 }
     );
 
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.4);
+    doc.setTextColor(92, 74, 58);
+    doc.text(
+      "Timing source: homatherapie.de/en/agnihotra-timings.html",
+      70,
+      616,
+      { maxWidth: pageWidth - 260 }
+    );
+
     if (assets.qrDataUrl) {
       try {
         doc.setFillColor(255, 252, 246);
@@ -358,10 +393,12 @@
       { maxWidth: pageWidth - 112 }
     );
 
+    const ingredientsBoxY = 326;
+    const ingredientsBoxH = 182;
     doc.setFillColor(255, 249, 239);
-    doc.roundedRect(42, 326, pageWidth - 84, 170, 12, 12, "F");
+    doc.roundedRect(42, ingredientsBoxY, pageWidth - 84, ingredientsBoxH, 12, 12, "F");
     doc.setDrawColor(210, 171, 125);
-    doc.roundedRect(42, 326, pageWidth - 84, 170, 12, 12);
+    doc.roundedRect(42, ingredientsBoxY, pageWidth - 84, ingredientsBoxH, 12, 12);
 
     doc.setFont("times", "bold");
     doc.setTextColor(62, 46, 34);
@@ -374,8 +411,8 @@
     doc.setTextColor(62, 46, 34);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10.6);
-    doc.text("- Whole unbroken rice grains (2 pinches)", 60, 394);
-    doc.text("- Pure cow ghee for charging each offering", 60, 410);
+    doc.text("- Whole raw rice grains for the offerings", 60, 394);
+    doc.text("- Cow ghee for the rice offerings", 60, 410);
     doc.text("- Clean, dry cow dung cakes as fuel", 60, 426);
 
     doc.setFont("helvetica", "bold");
@@ -384,24 +421,30 @@
     doc.text(pdfText.setupLabel, pageWidth / 2 + 6, 376);
     doc.setTextColor(62, 46, 34);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10.6);
-    doc.text("- Copper Agnihotra pyramid (proper size)", pageWidth / 2 + 10, 394);
-    doc.text("- Fire source, clean tray, and ash container", pageWidth / 2 + 10, 410);
-    doc.text("- Sit calmly with east/west facing discipline", pageWidth / 2 + 10, 426);
+    doc.setFontSize(9.6);
+    doc.text("- Copper Agnihotra pyramid of accepted size", pageWidth / 2 + 10, 394, {
+      maxWidth: pageWidth / 2 - 64,
+    });
+    doc.text("- Fire should be burning before the exact time", pageWidth / 2 + 10, 410, {
+      maxWidth: pageWidth / 2 - 64,
+    });
+    doc.text("- Use your tradition's setup and handling rules", pageWidth / 2 + 10, 426, {
+      maxWidth: pageWidth / 2 - 64,
+    });
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11.2);
     doc.setTextColor(166, 104, 43);
-    doc.text(pdfText.mantraPrepLabel, 56, 452);
+    doc.text(pdfText.mantraPrepLabel, 56, 454);
     doc.setTextColor(62, 46, 34);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10.6);
-    doc.text("- Keep sunrise and sunset mantras ready before ignition.", 60, 470);
-    doc.text("- Do all preparation 10 minutes before listed timing.", 60, 486);
+    doc.setFontSize(10.4);
+    doc.text("- Keep sunrise and sunset mantras ready before the time.", 60, 472);
+    doc.text("- Do all preparation 10 minutes before listed timing.", 60, 488);
 
-    const materialCardsY = 502;
+    const materialCardsY = ingredientsBoxY + ingredientsBoxH + 12;
     const cardW = 118;
-    const cardH = 94;
+    const cardH = 76;
     const cardGap = 10;
     const cards = [
       { key: "copperDataUrl", label: "Copper Pyramid" },
@@ -416,118 +459,200 @@
       doc.setDrawColor(210, 171, 125);
       doc.roundedRect(x, materialCardsY, cardW, cardH, 8, 8);
       const imageData = assets[card.key];
+      const imageH = 46;
       if (imageData) {
         try {
-          doc.addImage(imageData, "JPEG", x + 6, materialCardsY + 6, cardW - 12, 58);
+          doc.addImage(imageData, "JPEG", x + 6, materialCardsY + 5, cardW - 12, imageH);
         } catch (_) {
           doc.setFillColor(244, 230, 202);
-          doc.rect(x + 6, materialCardsY + 6, cardW - 12, 58, "F");
+          doc.rect(x + 6, materialCardsY + 5, cardW - 12, imageH, "F");
         }
       } else {
         doc.setFillColor(244, 230, 202);
-        doc.rect(x + 6, materialCardsY + 6, cardW - 12, 58, "F");
+        doc.rect(x + 6, materialCardsY + 5, cardW - 12, imageH, "F");
       }
       doc.setTextColor(88, 64, 45);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(8.8);
-      doc.text(card.label, x + cardW / 2, materialCardsY + 80, { align: "center" });
+      doc.setFontSize(8.6);
+      doc.text(card.label, x + cardW / 2, materialCardsY + 66, { align: "center" });
     });
 
-    doc.setFont("times", "bold");
-    doc.setTextColor(62, 46, 34);
-    doc.setFontSize(13.2);
-    doc.text(pdfText.ritualFlowTitle, 42, 610);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9.9);
-    doc.text(
-      "1) Prepare fire setup 10 min early  2) Face east/west  3) Offer ghee rice at exact second",
-      56,
-      626,
-      { maxWidth: pageWidth - 98 }
-    );
-    doc.text(
-      "4) Chant sunrise/sunset mantra with two oblations  5) Sit silently in gratitude.",
-      56,
-      640,
-      { maxWidth: pageWidth - 98 }
-    );
+    // Wrap Practice Flow / Timing Rule / Core Mantras / Sources inside one
+    // padded container so nothing crosses the visible page-border lines.
+    const bottomBoxX = 42;
+    const bottomBoxY = materialCardsY + cardH + 10;
+    const bottomBoxW = pageWidth - 84;
+    const bottomBoxH = pageHeight - 64 - bottomBoxY;
+    doc.setFillColor(255, 250, 240);
+    doc.roundedRect(bottomBoxX, bottomBoxY, bottomBoxW, bottomBoxH, 12, 12, "F");
+    doc.setDrawColor(210, 171, 125);
+    doc.roundedRect(bottomBoxX, bottomBoxY, bottomBoxW, bottomBoxH, 12, 12);
+
+    const innerX = bottomBoxX + 14;
+    const innerMaxW = bottomBoxW - 28;
+    let cursorY = bottomBoxY + 14;
 
     doc.setFont("times", "bold");
-    doc.setFontSize(16);
     doc.setTextColor(62, 46, 34);
-    doc.text(pdfText.timingRuleTitle, 42, 666);
+    doc.setFontSize(11.6);
+    doc.text(pdfText.ritualFlowTitle || "Simple Practice Flow", innerX, cursorY);
+    cursorY += 13;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.2);
+    doc.text(
+      "1) Prepare materials before the time  2) Keep the fire ready  3) Offer ghee rice at the exact time",
+      innerX,
+      cursorY,
+      { maxWidth: innerMaxW }
+    );
+    cursorY += 11;
+    doc.text(
+      "4) Chant the sunrise/sunset mantras  5) Continue according to your tradition.",
+      innerX,
+      cursorY,
+      { maxWidth: innerMaxW }
+    );
+    cursorY += 14;
+
+    doc.setFont("times", "bold");
+    doc.setFontSize(11.6);
+    doc.setTextColor(62, 46, 34);
+    doc.text(pdfText.timingRuleTitle, innerX, cursorY);
+    cursorY += 13;
     doc.setFont("helvetica", "bold");
     doc.setTextColor(156, 67, 38);
-    doc.setFontSize(12.3);
-    doc.text(pdfText.timingRuleLine, 56, 688);
+    doc.setFontSize(10.2);
+    doc.text(pdfText.timingRuleLine, innerX, cursorY);
+    cursorY += 12;
     doc.setTextColor(62, 46, 34);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(11.2);
+    doc.setFontSize(9.2);
     doc.text(
       pdfText.timingRuleDesc,
-      56,
-      706,
-      { maxWidth: pageWidth - 98 }
+      innerX,
+      cursorY,
+      { maxWidth: innerMaxW }
     );
+    cursorY += 16;
 
     doc.setFont("times", "bold");
-    doc.setFontSize(16);
-    doc.text(pdfText.coreMantrasTitle, 42, 732);
+    doc.setFontSize(11.6);
+    doc.text(pdfText.coreMantrasTitle, innerX, cursorY);
+    cursorY += 13;
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(11);
-    doc.text("Sunrise: Suryaya Swaha | Suryaya Idam Na Mama", 56, 752);
-    doc.text("Sunset: Agnaye Swaha | Agnaye Idam Na Mama", 56, 770);
+    doc.setFontSize(8.8);
+    doc.text("Sunrise: Suryaya Swaha | Suryaya Idam Na Mama", innerX, cursorY);
+    cursorY += 10;
+    doc.text("         Prajapataye Swaha | Prajapataye Idam Na Mama", innerX, cursorY);
+    cursorY += 10;
+    doc.text("Sunset:  Agnaye Swaha | Agnaye Idam Na Mama", innerX, cursorY);
+    cursorY += 10;
+    doc.text("         Prajapataye Swaha | Prajapataye Idam Na Mama", innerX, cursorY);
+
+    const sourcesY = bottomBoxY + bottomBoxH - 10;
     doc.setFont("helvetica", "italic");
-    doc.setFontSize(9.5);
-    doc.setTextColor(98, 72, 50);
-    doc.text("After ritual: preserve ash respectfully for garden/healing traditional use.", 56, 786);
+    doc.setFontSize(7.4);
+    doc.setTextColor(92, 72, 54);
+    doc.text(
+      "Sources: Homatherapy timings; Homa Therapy International timings; Agnihotra.org instructions and pyramid guidance.",
+      innerX,
+      sourcesY,
+      { maxWidth: innerMaxW }
+    );
   }
 
-  function drawScheduleTableHeader(doc, startX, startY, columnWidths, pdfText) {
+  const SCHEDULE_HEADER_HEIGHT = 16;
+  const SCHEDULE_MONTH_HEIGHT = 13;
+  const SCHEDULE_ROW_HEIGHT = 13;
+
+  function drawScheduleMiniHeader(doc, startX, startY, columnWidths, pdfText) {
+    const headerHeight = SCHEDULE_HEADER_HEIGHT;
+    const totalW = columnWidths[0] + columnWidths[1] + columnWidths[2];
     doc.setFillColor(241, 230, 209);
-    doc.roundedRect(
-      startX,
-      startY,
-      columnWidths[0] + columnWidths[1] + columnWidths[2],
-      28,
-      5,
-      5,
-      "F"
-    );
+    doc.roundedRect(startX, startY, totalW, headerHeight, 3, 3, "F");
     doc.setDrawColor(197, 159, 112);
-    doc.setLineWidth(0.8);
-    doc.roundedRect(
-      startX,
-      startY,
-      columnWidths[0] + columnWidths[1] + columnWidths[2],
-      28,
-      5,
-      5
-    );
-    doc.line(startX + columnWidths[0], startY, startX + columnWidths[0], startY + 28);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(startX, startY, totalW, headerHeight, 3, 3);
+    doc.line(startX + columnWidths[0], startY, startX + columnWidths[0], startY + headerHeight);
     doc.line(
       startX + columnWidths[0] + columnWidths[1],
       startY,
       startX + columnWidths[0] + columnWidths[1],
-      startY + 28
+      startY + headerHeight
     );
     doc.setFont("helvetica", "bold");
     doc.setTextColor(56, 41, 30);
-    doc.setFontSize(12.5);
-    doc.text(pdfText.tableDate, startX + 12, startY + 19);
-    doc.text(pdfText.tableSunrise, startX + columnWidths[0] + 12, startY + 19);
-    doc.text(pdfText.tableSunset, startX + columnWidths[0] + columnWidths[1] + 12, startY + 19);
+    doc.setFontSize(8.6);
+    const labelY = startY + 11;
+    doc.text(pdfText.tableDate, startX + columnWidths[0] / 2, labelY, { align: "center" });
+    doc.text(
+      pdfText.tableSunrise,
+      startX + columnWidths[0] + columnWidths[1] / 2,
+      labelY,
+      { align: "center" }
+    );
+    doc.text(
+      pdfText.tableSunset,
+      startX + columnWidths[0] + columnWidths[1] + columnWidths[2] / 2,
+      labelY,
+      { align: "center" }
+    );
   }
 
-  function drawMonthHeader(doc, label, startX, y, totalWidth) {
+  function drawMiniMonthHeader(doc, label, startX, y, width) {
     doc.setFillColor(249, 240, 224);
-    doc.roundedRect(startX, y, totalWidth, 24, 4, 4, "F");
+    doc.roundedRect(startX, y, width, SCHEDULE_MONTH_HEIGHT, 3, 3, "F");
     doc.setDrawColor(210, 171, 126);
-    doc.roundedRect(startX, y, totalWidth, 24, 4, 4);
-    doc.setFont("times", "bold");
+    doc.setLineWidth(0.4);
+    doc.roundedRect(startX, y, width, SCHEDULE_MONTH_HEIGHT, 3, 3);
+    doc.setFont("helvetica", "bold");
     doc.setTextColor(120, 73, 42);
-    doc.setFontSize(13.2);
-    doc.text(label, startX + 10, y + 16);
+    doc.setFontSize(8.4);
+    doc.text(label, startX + 7, y + 9);
+  }
+
+  function drawScheduleRow(doc, startX, y, columnWidths, row, zebra) {
+    const totalW = columnWidths[0] + columnWidths[1] + columnWidths[2];
+    const rowHeight = SCHEDULE_ROW_HEIGHT;
+    if (zebra) {
+      doc.setFillColor(251, 246, 237);
+      doc.rect(startX, y, totalW, rowHeight, "F");
+    }
+    doc.setFillColor(255, 239, 201);
+    doc.rect(startX + columnWidths[0], y, columnWidths[1], rowHeight, "F");
+    doc.setFillColor(244, 214, 195);
+    doc.rect(startX + columnWidths[0] + columnWidths[1], y, columnWidths[2], rowHeight, "F");
+    doc.setDrawColor(214, 194, 162);
+    doc.setLineWidth(0.35);
+    doc.rect(startX, y, totalW, rowHeight);
+    doc.line(startX + columnWidths[0], y, startX + columnWidths[0], y + rowHeight);
+    doc.line(
+      startX + columnWidths[0] + columnWidths[1],
+      y,
+      startX + columnWidths[0] + columnWidths[1],
+      y + rowHeight
+    );
+    doc.setTextColor(55, 43, 33);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.8);
+    const textY = y + 9;
+    doc.text(formatDateIndian(row.date), startX + columnWidths[0] / 2, textY, {
+      align: "center",
+    });
+    doc.setTextColor(173, 112, 36);
+    doc.text(
+      String(row.sunrise || "-"),
+      startX + columnWidths[0] + columnWidths[1] / 2,
+      textY,
+      { align: "center" }
+    );
+    doc.setTextColor(148, 75, 45);
+    doc.text(
+      String(row.sunset || "-"),
+      startX + columnWidths[0] + columnWidths[1] + columnWidths[2] / 2,
+      textY,
+      { align: "center" }
+    );
   }
 
   function drawFooter(doc, pageNumber, pageWidth, pageHeight) {
@@ -542,61 +667,6 @@
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9.4);
     doc.text(`Page ${pageNumber}`, pageWidth - 86, pageHeight - 34);
-  }
-
-  function drawSpiritualPage(doc, pageWidth, pageHeight, meta, assets, pdfText) {
-    doc.addPage();
-    drawPaperBackground(doc, pageWidth, pageHeight);
-    drawMandalaBorder(doc, pageWidth, pageHeight);
-    drawSacredWatermark(doc, pageWidth, pageHeight);
-    drawBrandHeader(
-      doc,
-      meta,
-      pageWidth,
-      assets.logoDataUrl,
-      "Spiritual Reflection",
-      pdfText
-    );
-
-    doc.setFont("times", "bold");
-    doc.setTextColor(62, 46, 34);
-    doc.setFontSize(20);
-    doc.text(pdfText.reflectionTitle, 42, 218);
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(11.5);
-    const points = [
-      "Atmosphere purification through disciplined fire ritual and mantra vibration.",
-      "Strengthens daily discipline by aligning life with sunrise and sunset.",
-      "Creates a mindful pause that supports gratitude, steadiness, and meditation.",
-      "Encourages family and community practice with shared sacred routine.",
-      "Supports a sattvic environment through intention, order, and offering.",
-    ];
-    points.forEach((line, idx) => {
-      doc.text(`- ${line}`, 52, 248 + idx * 28, { maxWidth: pageWidth - 104 });
-    });
-
-    doc.setFont("times", "bold");
-    doc.setFontSize(16);
-    doc.text("Gratitude & Meditation", 42, 432);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(11.2);
-    doc.text(
-      "After each offering, sit quietly for a few minutes. Observe the breath, the flame's memory, and the silence that follows. This pause deepens the effect of the ritual in daily life.",
-      52,
-      454,
-      { maxWidth: pageWidth - 104, lineHeightFactor: 1.35 }
-    );
-
-    doc.setFont("times", "italic");
-    doc.setFontSize(12.2);
-    doc.setTextColor(124, 84, 53);
-    doc.text(
-      '"May the fire of right action bring harmony to mind, home, and atmosphere."',
-      pageWidth / 2,
-      pageHeight - 132,
-      { align: "center", maxWidth: pageWidth - 120 }
-    );
   }
 
   function truncateLocationName(value) {
@@ -656,12 +726,22 @@
       riceDataUrl,
       qrDataUrl,
     };
-    const tableStartX = 42;
-    const tableStartY = 190;
-    const tableTotalWidth = pageWidth - 84;
-    const columnWidths = [170, 152, tableTotalWidth - 322];
-    const rowHeight = 28;
-    const bottomLimit = pageHeight - 92;
+    const tableStartX = 36;
+    const tableStartY = 178;
+    const tableTotalWidth = pageWidth - 72;
+    const columnGap = 14;
+    const miniWidth = Math.floor((tableTotalWidth - columnGap) / 2);
+    const dateColWidth = 64;
+    const timeColWidth = Math.floor((miniWidth - dateColWidth) / 2);
+    const miniColumnWidths = [
+      dateColWidth,
+      timeColWidth,
+      miniWidth - dateColWidth - timeColWidth,
+    ];
+    const leftX = tableStartX;
+    const rightX = tableStartX + miniWidth + columnGap;
+    const scheduleBodyStartY = tableStartY + SCHEDULE_HEADER_HEIGHT + 6;
+    const scheduleBottomLimit = pageHeight - 64;
 
     drawCoverPage(doc, meta, pageWidth, pageHeight, assets, pdfText);
     let pageNumber = 1;
@@ -672,21 +752,55 @@
     drawHowToPage(doc, pageWidth, pageHeight, meta, assets, pdfText);
     drawFooter(doc, pageNumber, pageWidth, pageHeight);
 
-    doc.addPage();
-    pageNumber += 1;
-    drawPaperBackground(doc, pageWidth, pageHeight);
-    drawMandalaBorder(doc, pageWidth, pageHeight);
-    drawBrandHeader(
-      doc,
-      meta,
-      pageWidth,
-      logoDataUrl,
-      "Ritual Timings Schedule",
-      pdfText
-    );
-    drawScheduleTableHeader(doc, tableStartX, tableStartY, columnWidths, pdfText);
-    let y = tableStartY + 36;
+    // We only draw the left mini-header up front. The right mini-header is
+    // drawn lazily the first time we actually advance into the right column —
+    // this keeps the page clean (no empty "Date | Sunrise | Sunset" strip on
+    // the right) for short ranges that fit entirely in the left column.
+    let rightHeaderDrawnOnThisPage = false;
+    const beginSchedulePage = () => {
+      doc.addPage();
+      pageNumber += 1;
+      drawPaperBackground(doc, pageWidth, pageHeight);
+      drawMandalaBorder(doc, pageWidth, pageHeight);
+      drawBrandHeader(
+        doc,
+        meta,
+        pageWidth,
+        logoDataUrl,
+        "Ritual Timings Schedule",
+        pdfText
+      );
+      drawScheduleMiniHeader(doc, leftX, tableStartY, miniColumnWidths, pdfText);
+      rightHeaderDrawnOnThisPage = false;
+    };
+
+    beginSchedulePage();
+
+    let currentCol = "left";
+    let cursorY = scheduleBodyStartY;
     let currentMonthKey = "";
+    let rowZebraCounter = 0;
+    const colX = () => (currentCol === "left" ? leftX : rightX);
+    const advanceColumnOrPage = () => {
+      if (currentCol === "left") {
+        if (!rightHeaderDrawnOnThisPage) {
+          drawScheduleMiniHeader(
+            doc,
+            rightX,
+            tableStartY,
+            miniColumnWidths,
+            pdfText
+          );
+          rightHeaderDrawnOnThisPage = true;
+        }
+        currentCol = "right";
+      } else {
+        drawFooter(doc, pageNumber, pageWidth, pageHeight);
+        beginSchedulePage();
+        currentCol = "left";
+      }
+      cursorY = scheduleBodyStartY;
+    };
 
     rows.forEach((row, index) => {
       const rowDate = parseRowDate(row.date);
@@ -695,86 +809,45 @@
         ? `${rowDate.getFullYear()}-${rowDate.getMonth()}`
         : `unknown-${String(row.date || index)}`;
 
+      // A month transition needs its label + at least one row of context to
+      // avoid an orphaned heading at the end of a column.
       if (monthKey !== currentMonthKey) {
-        if (y + 28 + rowHeight > bottomLimit) {
-          drawFooter(doc, pageNumber, pageWidth, pageHeight);
-          doc.addPage();
-          pageNumber += 1;
-          drawPaperBackground(doc, pageWidth, pageHeight);
-          drawMandalaBorder(doc, pageWidth, pageHeight);
-          drawBrandHeader(
-            doc,
-            meta,
-            pageWidth,
-            logoDataUrl,
-            "Ritual Timings Schedule",
-            pdfText
-          );
-          drawScheduleTableHeader(doc, tableStartX, tableStartY, columnWidths, pdfText);
-          y = tableStartY + 36;
+        if (
+          cursorY + SCHEDULE_MONTH_HEIGHT + SCHEDULE_ROW_HEIGHT >
+          scheduleBottomLimit
+        ) {
+          advanceColumnOrPage();
         }
-        drawMonthHeader(doc, monthLabel, tableStartX, y, tableTotalWidth);
-        y += 30;
+        drawMiniMonthHeader(doc, monthLabel, colX(), cursorY, miniWidth);
+        cursorY += SCHEDULE_MONTH_HEIGHT + 1;
         currentMonthKey = monthKey;
       }
 
-      if (y + rowHeight > bottomLimit) {
-        drawFooter(doc, pageNumber, pageWidth, pageHeight);
-        doc.addPage();
-        pageNumber += 1;
-        drawPaperBackground(doc, pageWidth, pageHeight);
-        drawMandalaBorder(doc, pageWidth, pageHeight);
-        drawBrandHeader(
-          doc,
-          meta,
-          pageWidth,
-          logoDataUrl,
-          "Ritual Timings Schedule",
-          pdfText
-        );
-        drawScheduleTableHeader(doc, tableStartX, tableStartY, columnWidths, pdfText);
-        y = tableStartY + 36;
+      // If this row doesn't fit, advance and replay the month header in the
+      // new column so the user keeps the month context.
+      if (cursorY + SCHEDULE_ROW_HEIGHT > scheduleBottomLimit) {
+        advanceColumnOrPage();
+        if (
+          cursorY + SCHEDULE_MONTH_HEIGHT + SCHEDULE_ROW_HEIGHT <=
+          scheduleBottomLimit
+        ) {
+          drawMiniMonthHeader(doc, monthLabel, colX(), cursorY, miniWidth);
+          cursorY += SCHEDULE_MONTH_HEIGHT + 1;
+        }
       }
 
-      if (index % 2 === 0) {
-        doc.setFillColor(251, 246, 237);
-        doc.rect(tableStartX, y, tableTotalWidth, rowHeight, "F");
-      }
-      doc.setFillColor(255, 239, 201);
-      doc.rect(tableStartX + columnWidths[0], y, columnWidths[1], rowHeight, "F");
-      doc.setFillColor(244, 214, 195);
-      doc.rect(tableStartX + columnWidths[0] + columnWidths[1], y, columnWidths[2], rowHeight, "F");
-
-      doc.setDrawColor(214, 194, 162);
-      doc.setLineWidth(0.45);
-      doc.rect(tableStartX, y, tableTotalWidth, rowHeight);
-      doc.line(tableStartX + columnWidths[0], y, tableStartX + columnWidths[0], y + rowHeight);
-      doc.line(
-        tableStartX + columnWidths[0] + columnWidths[1],
-        y,
-        tableStartX + columnWidths[0] + columnWidths[1],
-        y + rowHeight
+      drawScheduleRow(
+        doc,
+        colX(),
+        cursorY,
+        miniColumnWidths,
+        row,
+        rowZebraCounter % 2 === 0
       );
-
-      doc.setTextColor(55, 43, 33);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11.8);
-      doc.text(formatDateIndian(row.date), tableStartX + 10, y + 16);
-      doc.setTextColor(173, 112, 36);
-      doc.text(String(row.sunrise || "-"), tableStartX + columnWidths[0] + 10, y + 17);
-      doc.setTextColor(148, 75, 45);
-      doc.text(
-        String(row.sunset || "-"),
-        tableStartX + columnWidths[0] + columnWidths[1] + 10,
-        y + 17
-      );
-      doc.setTextColor(55, 43, 33);
-      y += rowHeight;
+      cursorY += SCHEDULE_ROW_HEIGHT;
+      rowZebraCounter += 1;
     });
 
-    drawFooter(doc, pageNumber, pageWidth, pageHeight);
-    drawSpiritualPage(doc, pageWidth, pageHeight, meta, assets, pdfText);
-    pageNumber += 1;
     drawFooter(doc, pageNumber, pageWidth, pageHeight);
     return doc.output("blob");
   }

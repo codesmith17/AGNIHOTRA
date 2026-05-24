@@ -76,6 +76,7 @@
         });
         state.preloaded[kind] = true;
         logBell("preload-success", { kind, assetPath });
+        window.AgnihotraInstrumentation?.recordBellPreload?.(kind, assetPath);
         return true;
       } catch (error) {
         state.lastError = error;
@@ -139,6 +140,10 @@
         }
         await plugin.play({ assetId: cfg.id });
         logBell("play-native-ok", { kind, reason });
+        window.AgnihotraInstrumentation?.recordBellPlay?.(kind, {
+          reason,
+          path: "native",
+        });
         return true;
       } catch (error) {
         const message = error?.message || String(error);

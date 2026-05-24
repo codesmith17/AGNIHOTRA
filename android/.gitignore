@@ -99,3 +99,13 @@ app/src/main/assets/public
 app/src/main/assets/capacitor.config.json
 app/src/main/assets/capacitor.plugins.json
 app/src/main/res/xml/config.xml
+
+# Local debug logs and support reports (do not commit)
+android/adb_logs.txt
+android/support-reports/
+
+# Generated test exports (keep release/ for APK/AAB only)
+release/*.pdf
+release/*.ics
+release/widget-screenshots/
+release/agnihotra-mock-button-guide.png

@@ -51,10 +51,10 @@ const ASTRONOMICAL_CONSTANTS = {
  * Agnihotra sunrise/sunset is DIFFERENT from the "actual" (visual) sunrise/sunset seen in news or weather apps.
  *
  * 1. VISUAL SUNRISE: Occurs when the top edge (upper limb) of the sun appears on the horizon.
- *    Calculated at altitude -0.833° to account for atmospheric refraction and the sun's radius.
+ *    Calculated at solar-elevation angle -0.833° to account for atmospheric refraction and the sun's radius.
  *
  * 2. AGNIHOTRA SUNRISE: Occurs when the CENTER of the sun's disk is exactly on the mathematical horizon.
- *    Calculated at altitude 0.0° with NO atmospheric refraction.
+ *    Calculated at solar-elevation angle 0.0° with NO atmospheric refraction.
  *
  * This is why Agnihotra timings may differ by 2-4 minutes from standard weather reports.
  * High-precision Agnihotra timing calculation based on Meeus/NOAA SPA.
@@ -176,7 +176,7 @@ function calculateAgnihotraTiming(dateUTC, lat, lon, tzHours) {
         Math.cos(degreesToRadians * moonAscendingNodeLongitude);
 
     /**
-     * sunApparentDeclination: The "height" of the Sun relative to the Equator. Determines day length.
+     * sunApparentDeclination: The Sun's angle relative to the Equator. Determines day length.
      */
     const sunApparentDeclination = Math.asin(
       Math.sin(degreesToRadians * correctedObliquityOfEcliptic) *
@@ -222,7 +222,7 @@ function calculateAgnihotraTiming(dateUTC, lat, lon, tzHours) {
    */
   let initialSunDetails = getSunDetails(dateUTC.getTime());
 
-  // Hour Angle for altitude = 0° (Mathematical Horizon):
+  // Hour Angle for solar-elevation angle = 0° (Mathematical Horizon):
   // cos(H) = (sin(h) - sin(lat)*sin(delta)) / (cos(lat)*cos(delta))
   // For Agnihotra h=0, so sin(h)=0. Simplifies to: -tan(lat)*tan(delta)
   const cosineOfHourAngle =
@@ -334,17 +334,28 @@ const CACHE_KEY = "agnihotra_timings_cache";
 const CACHE_EXPIRY_MS = 6 * 30 * 24 * 60 * 60 * 1000; // 6 months in milliseconds
 const TRANSLATION_STORAGE_KEY = "agnihotra_language";
 const DEBUG_STORAGE_KEY = "agnihotra_debug";
+const TIME_FORMAT_STORAGE_KEY = "agnihotra_time_format_v1";
+const SUPPORT_LOG_STORAGE_KEY = "agnihotra_support_logs_v1";
 const LAST_KNOWN_LOCATION_KEY = "agnihotra_last_known_location";
+const SUPPORT_INSTALL_ID_KEY = "agnihotra_support_install_id_v1";
+const SUPPORT_SESSION_ID_KEY = "agnihotra_support_session_id_v1";
 const EXPORT_FILE_REGISTRY_KEY = "agnihotra_export_file_registry_v1";
-const EXPORT_NOTIFICATION_CHANNEL_ID = "agnihotra-export-default-v2";
+const EXPORT_NOTIFICATION_CHANNEL_ID = "agnihotra-export-headsup-v5";
+const EXPORT_NATIVE_DIRECTORY = "DATA";
 const LOCATION_NAME_REFRESH_DISTANCE_KM = 3;
 const REQUIRE_MANDATORY_LOCATION_PERMISSION = true;
 const REQUIRE_MANDATORY_NOTIFICATION_PERMISSION = true;
+const LOCATION_PERMISSION_MAX_RETRIES = 3;
+const SUPPORT_LOG_MAX_ENTRIES = 1200;
+const SUPPORT_LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 let translations = {};
 let latestTimingsForNativeReminders = null;
 let latestExportLocationMeta = null;
 let agnihotraMainInitStarted = false;
-let permissionGateBound = false;
+let currentTimeFormatPreference = "ampm";
+let supportLogCaptureBound = false;
+const supportLogEntries = [];
+let supportLogPersistTimer = null;
 const exportNotificationReceiptWaiters = new Map();
 
 function markExportNotificationReceived(notificationId, meta = {}) {
@@ -385,7 +396,75 @@ function getStoredLanguagePreference() {
   return ["en", "hi", "mr"].includes(saved) ? saved : "en";
 }
 
+function getStoredTimeFormatPreference() {
+  const saved = String(localStorage.getItem(TIME_FORMAT_STORAGE_KEY) || "")
+    .trim()
+    .toLowerCase();
+  return saved === "24h" ? "24h" : "ampm";
+}
+
+function ensureSupportInstallId() {
+  try {
+    const existing = localStorage.getItem(SUPPORT_INSTALL_ID_KEY);
+    if (existing) return existing;
+    const created =
+      (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+        ? crypto.randomUUID()
+        : `inst-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    localStorage.setItem(SUPPORT_INSTALL_ID_KEY, created);
+    return created;
+  } catch (_) {
+    return `inst-ephemeral-${Date.now()}`;
+  }
+}
+
+function createSupportSessionId() {
+  return `sess-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+}
+
+function getSupportSessionId() {
+  try {
+    const existing = sessionStorage.getItem(SUPPORT_SESSION_ID_KEY);
+    if (existing) return existing;
+    const created = createSupportSessionId();
+    sessionStorage.setItem(SUPPORT_SESSION_ID_KEY, created);
+    return created;
+  } catch (_) {
+    return createSupportSessionId();
+  }
+}
+
+function getTimingCacheDiagnostics() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return { exists: false };
+    const parsed = JSON.parse(raw);
+    const timings = parsed?.timings && typeof parsed.timings === "object" ? parsed.timings : {};
+    const todayKey = formatDateToDDMMYYYY(new Date());
+    const totalDays = Object.keys(timings).length;
+    const lastUpdated = Number(parsed?.lastUpdated || 0) || null;
+    const ageMs = lastUpdated ? Math.max(0, Date.now() - lastUpdated) : null;
+    return {
+      exists: true,
+      lat: Number(parsed?.lat) || null,
+      lng: Number(parsed?.lng) || null,
+      locationName: parsed?.locationName || null,
+      totalDays,
+      hasToday: Boolean(timings?.[todayKey]),
+      lastUpdated,
+      ageMs,
+      expiresInMs: lastUpdated ? Math.max(0, CACHE_EXPIRY_MS - ageMs) : null,
+    };
+  } catch (error) {
+    return {
+      exists: true,
+      parseError: error?.message || String(error),
+    };
+  }
+}
+
 let currentLanguage = getStoredLanguagePreference();
+currentTimeFormatPreference = getStoredTimeFormatPreference();
 
 function isNativeAppRuntime() {
   return Boolean(
@@ -455,6 +534,76 @@ function isEffectivelyOnline() {
   return Boolean(navigator.onLine);
 }
 
+let getLocationPermissionState = async () => "unknown";
+let evaluateMandatoryPermissions = async () => true;
+let bindPermissionGateActions = () => {};
+let isPermissionGateVisible = () => false;
+let setPermissionGateVisible = () => {};
+
+const supportDiagnosticsContext = {
+  getRuntimeBoolean,
+  isNativeAppRuntime,
+  isForcedOfflineModeEnabled,
+  isEffectivelyOnline,
+  getStoredLanguagePreference,
+  ensureSupportInstallId,
+  getSupportSessionId,
+  getTimingCacheDiagnostics,
+  getLastKnownLocation,
+  getCurrentLanguage: () => currentLanguage,
+  getLatestTimingsForNativeReminders: () => latestTimingsForNativeReminders,
+  getUpcomingRefreshAt: () => Number(window.__agnihotraLastUpcomingRefreshAt || 0) || null,
+  getActiveCountdownCount: () => Object.keys(window.activeCountdowns || {}).length,
+  getPlayedAlertsCount: () => window.playedAlerts?.size || 0,
+  getLocationPermissionState: () => getLocationPermissionState(),
+  getNotificationPermissionStatus: async () =>
+    (await window.AgnihotraNotifications?.getPermissionStatus?.()) || "unknown",
+  serializeForConsole: (value) => {
+    if (typeof serializeForConsole === "function") return serializeForConsole(value);
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (value instanceof Error) return `${value.name}: ${value.message}`;
+    try {
+      return JSON.stringify(value);
+    } catch (_) {
+      return String(value);
+    }
+  },
+};
+
+// Exposed so support-payload-builder.js (loaded on every page including
+// settings.html / support.html) can read this app's live state without having
+// to import script.js.
+window.__agnihotraSupportCtx = supportDiagnosticsContext;
+
+const supportRuntime = window.AgnihotraSupportRuntime?.create?.(supportDiagnosticsContext) || null;
+
+const initSentryDiagnostics =
+  supportRuntime?.initSentryDiagnostics?.bind(supportRuntime) || (() => {});
+const captureDiagnosticBreadcrumb =
+  supportRuntime?.captureDiagnosticBreadcrumb?.bind(supportRuntime) || (() => {});
+const captureDiagnosticMessage =
+  supportRuntime?.captureDiagnosticMessage?.bind(supportRuntime) || (() => {});
+const captureDiagnosticException =
+  supportRuntime?.captureDiagnosticException?.bind(supportRuntime) || (() => {});
+const emitSupportSnapshot =
+  supportRuntime?.emitSupportSnapshot?.bind(supportRuntime) || (() => {});
+const reportBellDecision =
+  supportRuntime?.reportBellDecision?.bind(supportRuntime) || (() => {});
+
+window.AgnihotraDiagnostics = {
+  captureBreadcrumb: captureDiagnosticBreadcrumb,
+  captureMessage: captureDiagnosticMessage,
+  captureException: captureDiagnosticException,
+  emitSnapshot: emitSupportSnapshot,
+};
+
+window.captureAgnihotraSupportSnapshot = function(reason = "manual-console") {
+  emitSupportSnapshot(reason, { triggeredFrom: "window.captureAgnihotraSupportSnapshot" });
+};
+
+supportRuntime?.wireGlobalErrorHandlers?.();
+
 function isDebugEnabled() {
   return localStorage.getItem(DEBUG_STORAGE_KEY) === "1";
 }
@@ -470,8 +619,95 @@ function serializeForConsole(value) {
   }
 }
 
+function pruneSupportLogsInMemory(nowMs = Date.now()) {
+  const minTs = nowMs - SUPPORT_LOG_RETENTION_MS;
+  const filtered = supportLogEntries.filter((entry) => {
+    const ts = Date.parse(entry?.at || "");
+    return Number.isFinite(ts) && ts >= minTs;
+  });
+  supportLogEntries.splice(0, supportLogEntries.length, ...filtered);
+  if (supportLogEntries.length > SUPPORT_LOG_MAX_ENTRIES) {
+    supportLogEntries.splice(0, supportLogEntries.length - SUPPORT_LOG_MAX_ENTRIES);
+  }
+}
+
+function persistSupportLogsToStorageSoon() {
+  if (supportLogPersistTimer) return;
+  supportLogPersistTimer = setTimeout(() => {
+    supportLogPersistTimer = null;
+    try {
+      pruneSupportLogsInMemory();
+      localStorage.setItem(SUPPORT_LOG_STORAGE_KEY, JSON.stringify(supportLogEntries));
+    } catch (_) {}
+  }, 1200);
+}
+
+function hydrateSupportLogsFromStorage() {
+  try {
+    const raw = localStorage.getItem(SUPPORT_LOG_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    supportLogEntries.splice(0, supportLogEntries.length);
+    parsed.forEach((entry) => {
+      if (!entry || typeof entry !== "object") return;
+      supportLogEntries.push({
+        at: String(entry.at || new Date().toISOString()),
+        level: String(entry.level || "log"),
+        message: String(entry.message || ""),
+      });
+    });
+    pruneSupportLogsInMemory();
+    localStorage.setItem(SUPPORT_LOG_STORAGE_KEY, JSON.stringify(supportLogEntries));
+  } catch (_) {}
+}
+
+function appendSupportLogEntry(level, args) {
+  if (!Array.isArray(args) || args.length === 0) return;
+  const message = args.map((arg) => serializeForConsole(arg)).join(" ").trim();
+  if (!message) return;
+  // Capture rules:
+  //   - Always capture warnings and errors (these are critical signals for
+  //     customer support; they include library errors, capacitor failures,
+  //     network errors, geolocation errors, etc.)
+  //   - Capture anything explicitly tagged with [AGNIHOTRA] regardless of
+  //     level (our own structured diagnostic stream)
+  //   - Skip other low-signal info/log spam to keep the log under the
+  //     SUPPORT_LOG_MAX_ENTRIES cap.
+  const isAgniTagged = message.includes("[AGNIHOTRA]");
+  const isLoudLevel = level === "warn" || level === "error";
+  if (!isAgniTagged && !isLoudLevel) return;
+  supportLogEntries.push({
+    at: new Date().toISOString(),
+    level,
+    message: message.length > 4000 ? `${message.slice(0, 4000)}...[truncated]` : message,
+  });
+  if (supportLogEntries.length > SUPPORT_LOG_MAX_ENTRIES) {
+    supportLogEntries.splice(0, supportLogEntries.length - SUPPORT_LOG_MAX_ENTRIES);
+  }
+  pruneSupportLogsInMemory();
+  persistSupportLogsToStorageSoon();
+}
+
+function setupSupportLogCapture() {
+  if (supportLogCaptureBound) return;
+  supportLogCaptureBound = true;
+  hydrateSupportLogsFromStorage();
+  ["log", "info", "warn", "error"].forEach((methodName) => {
+    const original = console[methodName];
+    if (typeof original !== "function") return;
+    console[methodName] = (...args) => {
+      original.apply(console, args);
+      try {
+        appendSupportLogEntry(methodName, args);
+      } catch (_) {}
+    };
+  });
+}
+
 function debugLog(stage, payload = null) {
   if (!isDebugEnabled()) return;
+  captureDiagnosticBreadcrumb("debug", stage, payload || {}, "debug");
   if (payload === null) {
     console.log(`[AGNIHOTRA][${stage}]`);
   } else {
@@ -480,6 +716,7 @@ function debugLog(stage, payload = null) {
 }
 
 function locationLog(stage, payload = null) {
+  captureDiagnosticBreadcrumb("location", stage, payload || {}, "info");
   if (payload === null) {
     console.info(`[AGNIHOTRA][LOCATION] ${stage}`);
   } else {
@@ -490,6 +727,9 @@ function locationLog(stage, payload = null) {
     payload,
     at: new Date().toISOString()
   };
+  // Keep a rolling history (last ~50 entries) for the support report so we
+  // can see GPS attempts, fallbacks, errors and timing-cache hits over time.
+  window.AgnihotraInstrumentation?.recordLocation?.(stage, payload);
 }
 
 const DEBUG_OVERLAY_MAX_LINES = 120;
@@ -554,9 +794,7 @@ function pushDebugOverlayLine(level, args) {
 function setupDebugOverlayLogger() {
   const enabled = getRuntimeBoolean(
     window.AGNI_RUNTIME_CONFIG?.enableDebugOverlay,
-    window.AGNI_ENABLE_DEBUG_OVERLAY,
-    window.AGNI_RUNTIME_CONFIG?.enableTestReminder,
-    window.AGNI_ENABLE_TEST_REMINDER
+    window.AGNI_ENABLE_DEBUG_OVERLAY
   );
   if (!enabled) {
     const existing = document.getElementById("agnihotra-debug-overlay");
@@ -578,78 +816,6 @@ function setupDebugOverlayLogger() {
   });
 }
 
-function getMandatoryPermissionGate() {
-  if (typeof document === "undefined" || !document.body) return null;
-  let gate = document.getElementById("permission-gate");
-  if (!gate) {
-    gate = document.createElement("div");
-    gate.id = "permission-gate";
-    gate.className = "permission-gate hidden";
-    gate.innerHTML = `
-      <div class="permission-gate-card">
-        <h3 class="permission-gate-title">Permissions required</h3>
-        <p id="permission-gate-message" class="permission-gate-message">
-          Location and notification permissions are required for Agnihotra reminders.
-        </p>
-        <div class="permission-gate-actions">
-          <button id="permission-location-btn" type="button">Grant location</button>
-          <button id="permission-notification-btn" type="button">Grant notifications</button>
-          <button id="permission-settings-btn" type="button" class="secondary">Open app settings</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(gate);
-  }
-  return gate;
-}
-
-function setPermissionGateVisible(visible, message = "") {
-  const gate = getMandatoryPermissionGate();
-  if (!gate) return;
-  gate.classList.toggle("hidden", !visible);
-  const messageElement = document.getElementById("permission-gate-message");
-  if (messageElement && message) {
-    messageElement.innerText = message;
-  }
-}
-
-function isPermissionGateVisible() {
-  const gate = document.getElementById("permission-gate");
-  return Boolean(gate && !gate.classList.contains("hidden"));
-}
-
-async function getLocationPermissionState() {
-  if (!navigator.geolocation) return "unavailable";
-  if (!navigator.permissions?.query) return "prompt";
-  try {
-    const result = await navigator.permissions.query({ name: "geolocation" });
-    return result?.state || "prompt";
-  } catch (_) {
-    return "prompt";
-  }
-}
-
-async function requestMandatoryLocationPermission() {
-  if (!navigator.geolocation) return false;
-  try {
-    const position = await getCurrentPositionAsync({
-      enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 0,
-    });
-    if (position?.coords) {
-      saveLastKnownLocation(position.coords.latitude, position.coords.longitude);
-    }
-    return true;
-  } catch (error) {
-    locationLog("mandatory-location-request-failed", {
-      code: error?.code,
-      message: error?.message,
-    });
-    return false;
-  }
-}
-
 async function openNativeAppSettings() {
   const appPlugin = window.Capacitor?.Plugins?.App;
   if (!appPlugin || typeof appPlugin.openSettings !== "function") return false;
@@ -661,70 +827,6 @@ async function openNativeAppSettings() {
   }
 }
 
-async function evaluateMandatoryPermissions({ forcePrompt = false } = {}) {
-  let locationGranted = !REQUIRE_MANDATORY_LOCATION_PERMISSION;
-  let notificationGranted = !REQUIRE_MANDATORY_NOTIFICATION_PERMISSION;
-  let locationState = "unknown";
-  let notificationState = "unknown";
-
-  if (REQUIRE_MANDATORY_NOTIFICATION_PERMISSION) {
-    notificationState =
-      (await window.AgnihotraNotifications?.getPermissionStatus?.()) || "unknown";
-    if (forcePrompt) {
-      notificationGranted = Boolean(
-        await window.AgnihotraNotifications?.requestPermission({ force: true })
-      );
-      notificationState =
-        (await window.AgnihotraNotifications?.getPermissionStatus?.()) || notificationState;
-    } else {
-      if (notificationState === "granted") {
-        notificationGranted = true;
-      } else {
-        notificationGranted = Boolean(
-          await window.AgnihotraNotifications?.ensurePermissionBootstrap?.()
-        );
-        notificationState =
-          (await window.AgnihotraNotifications?.getPermissionStatus?.()) || notificationState;
-      }
-    }
-  }
-
-  if (REQUIRE_MANDATORY_LOCATION_PERMISSION) {
-    locationState = await getLocationPermissionState();
-    locationLog("mandatory-location-state", { state: locationState, forcePrompt });
-    if (locationState === "granted" && !forcePrompt) {
-      locationGranted = true;
-    } else {
-      locationGranted = await requestMandatoryLocationPermission();
-      locationState = await getLocationPermissionState();
-    }
-  }
-
-  const allGranted = locationGranted && notificationGranted;
-  if (allGranted) {
-    setPermissionGateVisible(false);
-    return true;
-  }
-
-  const blocked = [];
-  if (!locationGranted) blocked.push("location");
-  if (!notificationGranted) blocked.push("notifications");
-  const denied = [];
-  if (!locationGranted && locationState === "denied") denied.push("location");
-  if (!notificationGranted && notificationState === "denied") denied.push("notifications");
-  const gateMessage =
-    denied.length > 0
-      ? `Permission denied for ${denied.join(
-          " and "
-        )}. Tap Open app settings, allow permission, then return here.`
-      : `Please grant ${blocked.join(" and ")} permission${
-          blocked.length > 1 ? "s" : ""
-        } to continue.`;
-  setLocationLoading(false);
-  setPermissionGateVisible(true, gateMessage);
-  return false;
-}
-
 async function continueAppInitialization() {
   if (agnihotraMainInitStarted) return;
   agnihotraMainInitStarted = true;
@@ -733,6 +835,7 @@ async function continueAppInitialization() {
   window.AgnihotraBell?.preload?.().catch((err) =>
     console.warn("[AGNIHOTRA][BELL] preload-init-failed", err?.message)
   );
+  setupAndroidBackButton();
   getLocation();
   updateOnlineStatus();
   loadTranslations().then(() => {
@@ -741,60 +844,56 @@ async function continueAppInitialization() {
   });
 }
 
-function bindPermissionGateActions() {
-  if (permissionGateBound) return;
-  permissionGateBound = true;
-  const gate = getMandatoryPermissionGate();
-  if (!gate) return;
-
-  const locationBtn = document.getElementById("permission-location-btn");
-  const notificationBtn = document.getElementById("permission-notification-btn");
-  const settingsBtn = document.getElementById("permission-settings-btn");
-
-  locationBtn?.addEventListener("click", async () => {
-    const granted = await evaluateMandatoryPermissions({ forcePrompt: true });
-    if (granted) {
-      continueAppInitialization();
-    }
-  });
-
-  notificationBtn?.addEventListener("click", async () => {
-    const granted = await evaluateMandatoryPermissions({ forcePrompt: true });
-    if (granted) {
-      continueAppInitialization();
-    }
-  });
-
-  settingsBtn?.addEventListener("click", async () => {
-    const opened = await openNativeAppSettings();
-    if (!opened) {
-      alert("Please open app settings manually and allow location + notifications.");
-    }
-    const granted = await evaluateMandatoryPermissions({ forcePrompt: false });
-    if (granted) {
-      continueAppInitialization();
-    }
-  });
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && isPermissionGateVisible()) {
-      evaluateMandatoryPermissions({ forcePrompt: false }).then((granted) => {
-        if (granted) continueAppInitialization();
-      });
-    }
-  });
-
+/**
+ * On Android, the hardware/gesture back button is intercepted by the WebView
+ * and does nothing by default, leaving users stranded. This wires it so:
+ *  - If there is browser history to go back to, go back.
+ *  - Otherwise, minimise the app (bring to background) — never close/kill it.
+ */
+function setupAndroidBackButton() {
+  if (!isNativeAppRuntime()) return;
   const appPlugin = window.Capacitor?.Plugins?.App;
-  if (appPlugin?.addListener) {
-    appPlugin.addListener("appStateChange", ({ isActive }) => {
-      if (isActive && isPermissionGateVisible()) {
-        evaluateMandatoryPermissions({ forcePrompt: false }).then((granted) => {
-          if (granted) continueAppInitialization();
-        });
-      }
-    });
-  }
+  if (!appPlugin?.addListener) return;
+  appPlugin.addListener("backButton", ({ canGoBack }) => {
+    if (canGoBack) {
+      window.history.back();
+    } else {
+      appPlugin.minimizeApp?.().catch(() => {});
+    }
+  });
+  debugLog("[AGNIHOTRA][INIT] android-back-button-wired");
 }
+
+const permissionsGate = window.AgnihotraPermissionsGate?.create?.({
+  locationPermissionMaxRetries: LOCATION_PERMISSION_MAX_RETRIES,
+  requireMandatoryLocationPermission: REQUIRE_MANDATORY_LOCATION_PERMISSION,
+  requireMandatoryNotificationPermission: REQUIRE_MANDATORY_NOTIFICATION_PERMISSION,
+  captureDiagnosticBreadcrumb,
+  captureDiagnosticMessage,
+  captureDiagnosticException,
+  emitSupportSnapshot,
+  getCurrentPositionAsync,
+  saveLastKnownLocation,
+  locationLog,
+  setLocationLoading,
+  openNativeAppSettings,
+  continueAppInitialization,
+  requestNotificationPermission: (options) =>
+    window.AgnihotraNotifications?.requestPermission?.(options),
+  getNotificationPermissionStatus: () =>
+    window.AgnihotraNotifications?.getPermissionStatus?.(),
+  ensureNotificationPermissionBootstrap: () =>
+    window.AgnihotraNotifications?.ensurePermissionBootstrap?.(),
+});
+
+if (permissionsGate) {
+  getLocationPermissionState = permissionsGate.getLocationPermissionState;
+  evaluateMandatoryPermissions = permissionsGate.evaluateMandatoryPermissions;
+  bindPermissionGateActions = permissionsGate.bindPermissionGateActions;
+  isPermissionGateVisible = permissionsGate.isPermissionGateVisible;
+  setPermissionGateVisible = permissionsGate.setPermissionGateVisible;
+}
+
 
 window.enableAgnihotraDebug = function() {
   localStorage.setItem(DEBUG_STORAGE_KEY, "1");
@@ -806,14 +905,16 @@ window.disableAgnihotraDebug = function() {
   console.log("[AGNIHOTRA] Debug logging disabled.");
 };
 
-function saveLastKnownLocation(lat, lng, locationName = null) {
+function saveLastKnownLocation(lat, lng, locationName = null, locationDetail = null) {
   try {
+    const existing = getLastKnownLocation();
     localStorage.setItem(
       LAST_KNOWN_LOCATION_KEY,
       JSON.stringify({
         lat,
         lng,
         locationName,
+        locationDetail: locationDetail ?? existing?.locationDetail ?? null,
         savedAt: Date.now(),
       })
     );
@@ -1000,26 +1101,26 @@ function interpolateTemplate(template, values = {}) {
   });
 }
 
-function getReminderNotificationCopy(eventLabel, minutes) {
+function getReminderNotificationCopy(eventName, minutes) {
   const titleTemplate = t(
     "notifications.reminderTitle",
-    "Agnihotra reminder"
+    "{{event}} Agnihotra in {{minutes}} mins"
   );
   const bodyTemplate = t(
     "notifications.reminderBody",
-    "{{event}} starts in {{minutes}} minutes."
+    "Tap to open timings."
   );
   return {
-    title: interpolateTemplate(titleTemplate, { event: eventLabel, minutes }),
-    body: interpolateTemplate(bodyTemplate, { event: eventLabel, minutes }),
+    title: interpolateTemplate(titleTemplate, { event: eventName, minutes }),
+    body: interpolateTemplate(bodyTemplate, { event: eventName, minutes }),
   };
 }
 
 function getTestReminderNotificationCopy(seconds = 30) {
-  const titleTemplate = t("notifications.testTitle", "Agnihotra test reminder");
+  const titleTemplate = t("notifications.testTitle", "Test Agnihotra reminder");
   const bodyTemplate = t(
     "notifications.testBody",
-    "Test reminder starts in {{seconds}} seconds."
+    "Rings in {{seconds}} seconds."
   );
   return {
     title: interpolateTemplate(titleTemplate, { seconds }),
@@ -1028,10 +1129,10 @@ function getTestReminderNotificationCopy(seconds = 30) {
 }
 
 function getNowNotificationCopy(eventLabel) {
-  const titleTemplate = t("notifications.nowTitle", "Agnihotra time now");
+  const titleTemplate = t("notifications.nowTitle", "{{event}} Agnihotra now");
   const bodyTemplate = t(
     "notifications.nowBody",
-    "{{event}} is starting now."
+    "Begin Agnihotra now."
   );
   return {
     title: interpolateTemplate(titleTemplate, { event: eventLabel }),
@@ -1039,7 +1140,7 @@ function getNowNotificationCopy(eventLabel) {
   };
 }
 
-function buildNativeReminderEventsFromTimings(timings, daysAhead = 14) {
+function buildNativeReminderEventsFromTimings(timings, daysAhead = 30) {
   if (!timings || typeof timings !== "object") return [];
   const now = Date.now();
   const todayStart = new Date();
@@ -1080,8 +1181,8 @@ function buildNativeReminderEventsFromTimings(timings, daysAhead = 14) {
     if (sunriseTs > now + 30000) {
       const sunriseLabel = `${t("timeLabels.sunrise", "Sunrise")} • ${dateStr}`;
       const sunriseCopy = getReminderNotificationCopy(
-        sunriseLabel,
-        PRE_ALERT_MINUTES
+        t("timeLabels.sunrise", "Sunrise"),
+        getPreAlertMinutes()
       );
       events.push({
         id: `${dateStr}-sunrise`,
@@ -1095,8 +1196,8 @@ function buildNativeReminderEventsFromTimings(timings, daysAhead = 14) {
     if (sunsetTs > now + 30000) {
       const sunsetLabel = `${t("timeLabels.sunset", "Sunset")} • ${dateStr}`;
       const sunsetCopy = getReminderNotificationCopy(
-        sunsetLabel,
-        PRE_ALERT_MINUTES
+        t("timeLabels.sunset", "Sunset"),
+        getPreAlertMinutes()
       );
       events.push({
         id: `${dateStr}-sunset`,
@@ -1115,11 +1216,43 @@ function scheduleNativeRemindersFromTimings(timings, options = {}) {
   latestTimingsForNativeReminders = timings || latestTimingsForNativeReminders;
   const events = buildNativeReminderEventsFromTimings(
     latestTimingsForNativeReminders,
-    14
+    30
   );
-  if (events.length === 0) return;
+  captureDiagnosticBreadcrumb("notify", "native-reminder-build", {
+    events: events.length,
+    replaceExisting: options.replaceExisting !== false,
+  });
+  window.AgnihotraNotifications?.getPermissionStatus?.()
+    .then((status) => {
+      emitSupportSnapshot("native-reminder-build", {
+        events: events.length,
+        replaceExisting: options.replaceExisting !== false,
+        leadMinutes: getPreAlertMinutes(),
+        notificationPermission: status || "unknown",
+      });
+    })
+    .catch(() => {
+      emitSupportSnapshot("native-reminder-build", {
+        events: events.length,
+        replaceExisting: options.replaceExisting !== false,
+        leadMinutes: getPreAlertMinutes(),
+        notificationPermission: "unknown",
+      });
+    });
+  if (events.length === 0) {
+    reportBellDecision("notification-not-scheduled-no-events", {
+      reason: "no-future-events-built",
+      leadMinutes: getPreAlertMinutes(),
+    }, "warning");
+    return;
+  }
+  emitSupportSnapshot("native-reminder-schedule-request", {
+    events: events.length,
+    replaceExisting: options.replaceExisting !== false,
+    leadMinutes: getPreAlertMinutes(),
+  });
   window.AgnihotraNotifications?.scheduleUpcomingReminders(events, {
-    leadMinutes: PRE_ALERT_MINUTES,
+    leadMinutes: getPreAlertMinutes(),
     replaceExisting: options.replaceExisting !== false,
   });
 }
@@ -1147,13 +1280,21 @@ function isTestReminderEnabled() {
 
 function updateTestReminderButtonCopy() {
   const button = document.getElementById("testReminderBtn");
-  if (!button) return;
-  const seconds = getTestReminderSeconds();
-  const buttonTemplate = t(
-    "notifications.testButtonTemplate",
-    "Test reminder in {{seconds}}s"
-  );
-  button.textContent = interpolateTemplate(buttonTemplate, { seconds });
+  const mockReminderBtn = document.getElementById("mockReminderBtn");
+  const leadMinutes = getPreAlertMinutes();
+
+  if (button) {
+    const seconds = getTestReminderSeconds();
+    const buttonTemplate = t(
+      "notifications.testButtonTemplate",
+      "Test reminder in {{seconds}}s"
+    );
+    button.textContent = interpolateTemplate(buttonTemplate, { seconds });
+  }
+
+  if (mockReminderBtn) {
+    mockReminderBtn.textContent = `Mock ${leadMinutes}m reminder`;
+  }
 }
 
 function clearTestReminderTimers() {
@@ -1182,17 +1323,27 @@ async function runQuickReminderTest() {
     body: reminderCopy.body,
     tag: `agnihotra-test-reminder-${seconds}s`
   });
-  console.log("[AGNIHOTRA][ALERT] test-reminder-schedule-result", {
+  console.log(`[AGNIHOTRA][ALERT] test-reminder-schedule-result ${serializeForConsole({
     scheduled: Boolean(scheduled),
     isNative,
     delaySeconds: seconds,
-  });
+  })}`);
 
   if (!scheduled) {
+    reportBellDecision("test-reminder-schedule-failed", {
+      isNative,
+      delaySeconds: seconds,
+      reason: "scheduleTestReminder-returned-false",
+    }, "warning");
     clearTestReminderTimers();
     setTestReminderStatus("Unable to schedule test reminder.");
     return;
   }
+  reportBellDecision("test-reminder-scheduled", {
+    isNative,
+    delaySeconds: seconds,
+    mode: isNative ? "notification-channel-sound-only" : "web-notification-and-triple-bell",
+  });
 
   clearTestReminderTimers();
   let secondsLeft = seconds;
@@ -1215,13 +1366,21 @@ async function runQuickReminderTest() {
 
   testReminderTimeoutId = setTimeout(() => {
     if (isNative) {
-      console.log("[AGNIHOTRA][ALERT] test-reminder-trigger-native", {
+      console.log(`[AGNIHOTRA][ALERT] test-reminder-trigger-native ${serializeForConsole({
+        mode: "notification-channel-sound-only",
+      })}`);
+      reportBellDecision("test-reminder-native-triggered", {
+        delaySeconds: seconds,
         mode: "notification-channel-sound-only",
       });
       setTestReminderStatus("Test notification triggered.");
     } else {
       window.AgnihotraBell?.playTriple?.("test-reminder-web");
-      console.log("[AGNIHOTRA][ALERT] test-reminder-trigger-web", {
+      console.log(`[AGNIHOTRA][ALERT] test-reminder-trigger-web ${serializeForConsole({
+        mode: "native-audio-3x",
+      })}`);
+      reportBellDecision("test-reminder-web-triggered", {
+        delaySeconds: seconds,
         mode: "native-audio-3x",
       });
       setTestReminderStatus("Test bell triggered.");
@@ -1330,8 +1489,10 @@ function setupLanguageToggle() {
 function setupTestReminderButton() {
   const wrap = document.querySelector(".test-reminder-wrap");
   const button = document.getElementById("testReminderBtn");
-  const mockBtn = document.getElementById("mockCountdownBtn");
-  if (!button && !mockBtn) return;
+  const mockSunriseBtn = document.getElementById("mockSunriseBtn");
+  const mockSunsetBtn = document.getElementById("mockSunsetBtn");
+  const mockReminderBtn = document.getElementById("mockReminderBtn");
+  if (!button && !mockSunriseBtn && !mockSunsetBtn && !mockReminderBtn) return;
   if (!isTestReminderEnabled()) {
     if (wrap) wrap.style.display = "none";
     return;
@@ -1344,16 +1505,82 @@ function setupTestReminderButton() {
       runQuickReminderTest();
     });
   }
-  if (mockBtn) {
-    mockBtn.addEventListener("click", () => {
+  if (mockSunriseBtn) {
+    mockSunriseBtn.addEventListener("click", () => {
       initAudio();
-      runMockWindowOpenTest(10);
+      runMockWindowOpenTest(10, true);
+    });
+  }
+  if (mockSunsetBtn) {
+    mockSunsetBtn.addEventListener("click", () => {
+      initAudio();
+      runMockWindowOpenTest(10, false);
+    });
+  }
+  if (mockReminderBtn) {
+    mockReminderBtn.addEventListener("click", () => {
+      initAudio();
+      runMockReminderTest(15);
     });
   }
 }
 
+let mockReminderIntervalId = null;
+
+function runMockReminderTest(seconds = 15) {
+  console.log(`[AGNIHOTRA][MOCK] trigger-clicked ${serializeForConsole({ seconds })}`);
+  if (mockReminderIntervalId) {
+    clearInterval(mockReminderIntervalId);
+  }
+
+  const safeSeconds = Math.max(1, Number(seconds) || 15);
+  let secondsLeft = safeSeconds;
+  const leadMinutes = getPreAlertMinutes();
+  const requestedAt = Date.now();
+
+  window.AgnihotraInstrumentation?.recordMockReminder?.({
+    delaySeconds: safeSeconds,
+    leadMinutes,
+    requestedAt: new Date(requestedAt).toISOString(),
+  });
+
+  setTestReminderStatus(`Scheduling mock ${leadMinutes}m reminder in ${secondsLeft}s...`);
+
+  window.AgnihotraNotifications?.scheduleTestReminder({
+    delaySeconds: safeSeconds,
+    title: `Mock ${leadMinutes}m Reminder`,
+    body: `This is a test of the ${leadMinutes}-minute bell. It should ring once.`,
+    tag: `mock-${leadMinutes}m-reminder`,
+  }).then((success) => {
+    console.info(
+      `[AGNIHOTRA][MOCK] schedule-result ${serializeForConsole({
+        success,
+        delaySeconds: safeSeconds,
+        leadMinutes,
+        elapsedMs: Date.now() - requestedAt,
+      })}`
+    );
+    if (success) {
+      mockReminderIntervalId = setInterval(() => {
+        secondsLeft -= 1;
+        if (secondsLeft <= 0) {
+          clearInterval(mockReminderIntervalId);
+          setTestReminderStatus("Mock reminder triggered!");
+          console.info(`[AGNIHOTRA][MOCK] countdown-complete`);
+        } else {
+          setTestReminderStatus(`Mock reminder scheduled. Ringing in ${secondsLeft}s... You can close the app.`);
+        }
+      }, 1000);
+    } else {
+      setTestReminderStatus("Failed to schedule mock reminder. Check permissions.");
+      console.warn("[AGNIHOTRA][MOCK] schedule-failed");
+    }
+  });
+}
+
 let mockCountdownIntervalId = null;
 let mockCountdownTimeoutId = null;
+let mockCountdownRestoreTimeoutId = null;
 
 function setMockCountdownStatus(message) {
   const status = document.getElementById("mockCountdownStatus");
@@ -1369,6 +1596,32 @@ function clearMockCountdownTimers() {
     clearTimeout(mockCountdownTimeoutId);
     mockCountdownTimeoutId = null;
   }
+  if (mockCountdownRestoreTimeoutId) {
+    clearTimeout(mockCountdownRestoreTimeoutId);
+    mockCountdownRestoreTimeoutId = null;
+  }
+}
+
+function runMockCountdownVisualPreview(seconds = 10, isSunrise = false) {
+  const countdownElement = document.getElementById("upcomingCountdown");
+  if (!countdownElement) return;
+  const safeSeconds = Math.max(1, Number(seconds) || 10);
+  countdownElement.innerHTML = "";
+  window.activeCountdowns = {};
+  window.countdownLabels = {};
+  displayCountdownAndTime(
+    countdownElement,
+    "mockwindowmain",
+    isSunrise ? "Sunrise Preview" : "Sunset Preview",
+    Date.now() + safeSeconds * 1000,
+    isSunrise,
+    true
+  );
+  mockCountdownRestoreTimeoutId = setTimeout(() => {
+    refreshUpcomingEvents();
+    setMockCountdownStatus("");
+    mockCountdownRestoreTimeoutId = null;
+  }, (safeSeconds + 16) * 1000);
 }
 
 function ringSingleBellInstant(reason = "ting") {
@@ -1382,7 +1635,7 @@ function ringSingleBellInstant(reason = "ting") {
   return false;
 }
 
-function runMockWindowOpenTest(seconds = 10) {
+function runMockWindowOpenTest(seconds = 10, isSunrise = false) {
   clearMockCountdownTimers();
   const safeSeconds = Math.max(1, Number(seconds) || 10);
   const startedAt = Date.now();
@@ -1399,14 +1652,23 @@ function runMockWindowOpenTest(seconds = 10) {
     console.warn("[AGNIHOTRA][MOCK] initAudio-threw", { message: err?.message });
   }
 
-  console.log("[AGNIHOTRA][MOCK] tap", {
+  console.log(`[AGNIHOTRA][MOCK] tap ${serializeForConsole({
     seconds: safeSeconds,
     runtime: isNativeAppRuntime() ? "native" : "web",
     visibility:
       typeof document !== "undefined" ? document.visibilityState : "n/a",
     audioCtxState: audioCtx?.state || "none",
     bellReady: window.AgnihotraBell?.isReady?.() ?? "n/a",
+  })}`);
+  reportBellDecision("mock-window-start", {
+    seconds: safeSeconds,
+    runtime: isNativeAppRuntime() ? "native" : "web",
+    visibility:
+      typeof document !== "undefined" ? document.visibilityState : "n/a",
+    bellReady: window.AgnihotraBell?.isReady?.() ?? "n/a",
   });
+
+  runMockCountdownVisualPreview(safeSeconds, isSunrise);
 
   setMockCountdownStatus(
     interpolateTemplate(template, { seconds: secondsLeft })
@@ -1414,12 +1676,12 @@ function runMockWindowOpenTest(seconds = 10) {
 
   mockCountdownIntervalId = setInterval(() => {
     secondsLeft -= 1;
-    console.log("[AGNIHOTRA][MOCK] tick", {
+    console.log(`[AGNIHOTRA][MOCK] tick ${serializeForConsole({
       secondsLeft,
       elapsedMs: Date.now() - startedAt,
       visibility: document.visibilityState,
       bellReady: window.AgnihotraBell?.isReady?.() ?? "n/a",
-    });
+    })}`);
     if (secondsLeft <= 0) {
       if (mockCountdownIntervalId) {
         clearInterval(mockCountdownIntervalId);
@@ -1439,21 +1701,33 @@ function runMockWindowOpenTest(seconds = 10) {
     const isForeground =
       typeof document !== "undefined" &&
       document.visibilityState === "visible";
-    console.log("[AGNIHOTRA][MOCK] zero-mark-fire", {
+    console.log(`[AGNIHOTRA][MOCK] zero-mark-fire ${serializeForConsole({
       elapsedMs: Date.now() - startedAt,
       visibility: document.visibilityState,
       bellReady: window.AgnihotraBell?.isReady?.() ?? "n/a",
       willRing: isForeground,
-    });
+    })}`);
     if (isForeground) {
-      ringSingleBellInstant("mock-zero-mark");
+      const rung = ringSingleBellInstant("mock-zero-mark");
+      reportBellDecision("mock-zero-mark-fire", {
+        elapsedMs: Date.now() - startedAt,
+        visibility: document.visibilityState,
+        bellReady: window.AgnihotraBell?.isReady?.() ?? "n/a",
+        willRing: true,
+        ringCallReturned: rung,
+      });
       setMockCountdownStatus("Mock window opened — single bell ting.");
     } else {
       // App is backgrounded/closed: never ring the single ting.
       setMockCountdownStatus("App not foreground — single ting skipped.");
-      console.log("[AGNIHOTRA][ALERT] mock-window-open-skip", {
+      console.log(`[AGNIHOTRA][ALERT] mock-window-open-skip ${serializeForConsole({
         reason: "app-not-foreground",
-      });
+      })}`);
+      reportBellDecision("mock-zero-mark-skipped", {
+        reason: "app-not-foreground",
+        elapsedMs: Date.now() - startedAt,
+        visibility: document.visibilityState,
+      }, "warning");
     }
     clearMockCountdownTimers();
   }, safeSeconds * 1000);
@@ -1511,7 +1785,10 @@ function setScheduleLoading(isLoading) {
 // Function to check and get valid cached data
 function getValidCachedData(lat, lng) {
   const cachedJSON = localStorage.getItem(CACHE_KEY);
-  if (!cachedJSON) return null;
+  if (!cachedJSON) {
+    emitSupportSnapshot("cache-miss", { reason: "no-cache" });
+    return null;
+  }
 
   try {
     const cache = JSON.parse(cachedJSON);
@@ -1519,6 +1796,10 @@ function getValidCachedData(lat, lng) {
 
     // 1. Check if older than 6 months
     if (now - cache.lastUpdated > CACHE_EXPIRY_MS) {
+      emitSupportSnapshot("cache-miss", {
+        reason: "expired",
+        cacheAgeMs: now - cache.lastUpdated,
+      });
       return null;
     }
 
@@ -1527,18 +1808,36 @@ function getValidCachedData(lat, lng) {
     const latDiff = Math.abs(cache.lat - lat);
     const lngDiff = Math.abs(cache.lng - lng);
     if (latDiff > 0.05 || lngDiff > 0.05) {
+      emitSupportSnapshot("cache-miss", {
+        reason: "location-shift",
+        latDiff,
+        lngDiff,
+      });
       return null;
     }
 
     // 3. Check if we have data for today
     const todayStr = formatDateToDDMMYYYY(new Date());
     if (!cache.timings || !cache.timings[todayStr]) {
+      emitSupportSnapshot("cache-miss", {
+        reason: "today-not-present",
+        today: todayStr,
+        hasTimings: Boolean(cache.timings),
+      });
       return null;
     }
 
+    emitSupportSnapshot("cache-hit", {
+      today: todayStr,
+      locationName: cache.locationName || null,
+    });
     return cache;
   } catch (e) {
     console.error("Error reading cache:", e);
+    emitSupportSnapshot("cache-miss", {
+      reason: "parse-error",
+      error: e?.message || String(e),
+    });
     return null;
   }
 }
@@ -1654,9 +1953,9 @@ async function getSunriseSunset(lat, lng, locationName = null) {
       : null;
 
     if (!todayData || !tomorrowData) {
-      // Fallback source for immediate display if local calc fails
-      await getSunriseSunsetFromSunAPI(lat, lng, todayData, tomorrowData);
-      // Use the rendered values if fallback path handled it.
+      console.error("[Timings] Engine returned null — polar region or bad coordinates?", { lat, lng });
+      setLocationLoading(false);
+      setScheduleLoading(false);
       return;
     }
 
@@ -1684,196 +1983,11 @@ async function getSunriseSunset(lat, lng, locationName = null) {
       elapsedMs: Math.round(performance.now() - startedAt),
       error: error?.message || String(error)
     });
-    await getSunriseSunsetFromSunAPI(lat, lng);
-  }
-}
-
-// Function to fetch data from homatherapie.de for a date range
-async function fetchSunriseSunsetData(date, lat, lng, endDate = null) {
-  try {
-    const year = date.split(".")[2];
-    const actualEndDate = endDate || date;
-    const url =
-      "https://www.homatherapie.de/en/Agnihotra_Zeitenprogramm/results.html";
-
-    // Get location name first
-    let locationName = `${lat.toFixed(4)}, ${lng.toFixed(4)}`; // Fallback to coordinates
-
-    try {
-      const response = await fetch(
-        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        locationName = `${data.city || data.locality || "Unknown"}, ${
-          data.principalSubdivision || data.countryName || "Unknown"
-        }`;
-      }
-    } catch (geoError) {
-      // Silently fail geo-naming
-    }
-
-    // Create form data
-    const formData = new URLSearchParams();
-    formData.append("yearDate", year);
-    formData.append("location", locationName);
-    formData.append("lat_deg", lat.toString());
-    formData.append("lon_deg", lng.toString());
-    formData.append("date", date);
-    formData.append("end_date", actualEndDate);
-
-    // Try deployed proxies first, then local proxy
-    const proxyEndpoints = [
-      "https://agnihotra-eternal-agni.vercel.app/api/agnihotra", // Deployed Vercel endpoint
-      "http://localhost:8080/api/agnihotra", // Local development endpoint
-    ];
-
-    let response = null;
-    let proxyUsed = null;
-
-    for (const endpoint of proxyEndpoints) {
-      try {
-        response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: formData.toString(),
-        });
-
-        if (response.ok) {
-          proxyUsed = endpoint;
-          break;
-        }
-      } catch (proxyError) {
-        continue;
-      }
-    }
-
-    if (response && response.ok) {
-      const htmlText = await response.text();
-
-      const timingsMap = {};
-      const lines = htmlText.split("\n");
-
-      // Regex to find dates like DD.MM.YYYY
-      const dateRegex = /(\d{2}\.\d{2}\.\d{4})/;
-      // Regex to find times like HH:MM:SS
-      const timeRegex = /\b(\d{1,2}):(\d{2}):(\d{2})\b/g;
-
-      lines.forEach((line) => {
-        const dateMatch = line.match(dateRegex);
-        if (
-          dateMatch &&
-          line.includes("<td") &&
-          line.includes('align="right"')
-        ) {
-          const dateFound = dateMatch[1];
-          const times = [];
-          let match;
-
-          // Reset regex state for each line
-          timeRegex.lastIndex = 0;
-          while ((match = timeRegex.exec(line)) !== null) {
-            const hour = match[1].padStart(2, "0");
-            const minute = match[2];
-            const second = match[3];
-            times.push(`${hour}:${minute}:${second}`);
-          }
-
-          if (times.length >= 2) {
-            timingsMap[dateFound] = {
-              date: dateFound,
-              sunrise: times[0],
-              sunset: times[1],
-            };
-          }
-        }
-      });
-
-      const count = Object.keys(timingsMap).length;
-      if (count === 0) {
-        return null;
-      }
-
-      return timingsMap;
-    } else {
-      // Since we can't reliably access homatherapie.de from browser,
-      // we'll return null to trigger fallback to sunrisesunset.io
-      throw new Error(
-        "All proxy endpoints failed. Browser CORS policy prevents direct access to homatherapie.de API."
-      );
-    }
-  } catch (error) {
-    console.error(`Error fetching data for ${date}:`, error);
-    return null;
-  }
-}
-
-// Alternative function using sunrisesunset.io API (provides seconds precision)
-async function getSunriseSunsetFromSunAPI(
-  lat,
-  lng,
-  existingTodayData = null,
-  existingTomorrowData = null
-) {
-  try {
-    let todayData = existingTodayData;
-    let tomorrowData = existingTomorrowData;
-
-    // Only fetch missing data
-    const fetchPromises = [];
-    if (!todayData) {
-      const apiUrlToday = `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lng}&date=today`;
-      fetchPromises.push(fetch(apiUrlToday).then((r) => r.json()));
-    } else {
-      fetchPromises.push(Promise.resolve(null));
-    }
-
-    if (!tomorrowData) {
-      const apiUrlTomorrow = `https://api.sunrisesunset.io/json?lat=${lat}&lng=${lng}&date=tomorrow`;
-      fetchPromises.push(fetch(apiUrlTomorrow).then((r) => r.json()));
-    } else {
-      fetchPromises.push(Promise.resolve(null));
-    }
-
-    const [todayResponse, tomorrowResponse] = await Promise.all(fetchPromises);
-
-    // Use existing data or convert from API response
-    if (!todayData && todayResponse) {
-      const todayResults = todayResponse.results;
-      todayData = {
-        date: todayResults.date,
-        sunrise: todayResults.sunrise,
-        sunset: todayResults.sunset,
-      };
-    }
-
-    if (!tomorrowData && tomorrowResponse) {
-      const tomorrowResults = tomorrowResponse.results;
-      tomorrowData = {
-        date: tomorrowResults.date,
-        sunrise: tomorrowResults.sunrise,
-        sunset: tomorrowResults.sunset,
-      };
-    }
-
-    displaySunriseSunset(todayData, "todayTimes");
-    displaySunriseSunset(tomorrowData, "tomorrowTimes");
-    displayUpcomingTimings(todayData, tomorrowData, "upcomingTimes");
-    scheduleNativeRemindersFromTimings(
-      {
-        [todayData.date]: todayData,
-        [tomorrowData.date]: tomorrowData,
-      },
-      { replaceExisting: true }
-    );
-  } catch (error) {
-    console.error("Error with sunrisesunset.io API:", error);
     setLocationLoading(false);
+    setScheduleLoading(false);
   }
 }
+
 
 function displaySunriseSunset(results, elementId) {
   const element = document.getElementById(elementId);
@@ -1905,15 +2019,30 @@ function displaySunriseSunset(results, elementId) {
 
 function formatTimeToAMPM(timeStr) {
   if (!timeStr) return "--:--:--";
-  if (timeStr.includes("AM") || timeStr.includes("PM")) return timeStr;
+  const normalized = String(timeStr).trim();
+  const match = normalized.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!match) return normalized;
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3] || "0");
+  const meridiem = match[4] ? match[4].toUpperCase() : null;
+  if (meridiem) {
+    if (meridiem === "PM" && hours !== 12) hours += 12;
+    if (meridiem === "AM" && hours === 12) hours = 0;
+  }
 
-  const [hours, minutes, seconds] = timeStr.split(":").map(Number);
-  const ampm = hours >= 12 ? "PM" : "AM";
-  const h = hours % 12 || 12;
-  return `${String(h).padStart(2, "0")}:${String(minutes).padStart(
+  if (currentTimeFormatPreference === "24h") {
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
     2,
     "0"
-  )}:${String(seconds).padStart(2, "0")} ${ampm}`;
+    )}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  const ampm = hours >= 12 ? "PM" : "AM";
+  const h = hours % 12 || 12;
+  return `${String(h).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(
+    seconds
+  ).padStart(2, "0")} ${ampm}`;
 }
 
 function displayFullSchedule(timings) {
@@ -1980,6 +2109,7 @@ function setScheduleExportStatus(message, isError = false) {
 }
 
 function exportLog(event, payload = null) {
+  captureDiagnosticBreadcrumb("export", event, payload || {}, "info");
   if (payload == null) {
     console.log(`[AGNIHOTRA][EXPORT] ${event}`);
     return;
@@ -2000,18 +2130,18 @@ function showExportToast(message, isError = false) {
   toast.style.transform = "translateX(-50%)";
   toast.style.zIndex = "9999";
   toast.style.maxWidth = "92vw";
-  toast.style.padding = "12px 16px";
-  toast.style.borderRadius = "12px";
-  toast.style.fontSize = "0.95rem";
-  toast.style.fontWeight = "700";
-  toast.style.color = "#fff";
-  toast.style.background = isError ? "rgba(164, 40, 40, 0.95)" : "rgba(62, 124, 48, 0.95)";
-  toast.style.boxShadow = "0 12px 26px rgba(0,0,0,0.30)";
-  toast.style.border = "1px solid rgba(255,255,255,0.18)";
+  toast.style.padding = "9px 13px";
+  toast.style.borderRadius = "999px";
+  toast.style.fontSize = "0.86rem";
+  toast.style.fontWeight = "600";
+  toast.style.color = isError ? "#7d1d1d" : "#3f2a14";
+  toast.style.background = "rgba(255, 252, 246, 0.96)";
+  toast.style.boxShadow = "0 8px 20px rgba(61, 35, 12, 0.16)";
+  toast.style.border = `1px solid ${isError ? "rgba(164, 40, 40, 0.26)" : "rgba(184, 115, 51, 0.22)"}`;
   document.body.appendChild(toast);
   setTimeout(() => {
     toast.remove();
-  }, 3600);
+  }, 2400);
 }
 
 function showInstantExportFeedback(message, isError = false) {
@@ -2019,7 +2149,17 @@ function showInstantExportFeedback(message, isError = false) {
   if (normalized.includes("opening") || normalized.includes("tap delay")) {
     return;
   }
-  showExportToast(message, isError);
+  let toastMessage = String(message || "").replace(/^[✅❌]\s*/, "").trim();
+  if (normalized.includes("pdf")) {
+    toastMessage = isError ? "PDF failed" : "PDF saved";
+  } else if (normalized.includes("ics")) {
+    toastMessage = isError ? "ICS failed" : "ICS saved";
+  } else if (isError) {
+    toastMessage = "Export failed";
+  } else if (normalized.includes("saved") || normalized.includes("ready")) {
+    toastMessage = "Export saved";
+  }
+  showExportToast(toastMessage, isError);
 }
 
 function getEffectiveExportLocation() {
@@ -2083,35 +2223,19 @@ async function resolveExportLocationNameForCoordinates(lat, lng, rawName) {
   }
 
   try {
-    const bdcResponse = await fetch(
-      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
-    );
-    if (bdcResponse.ok) {
-      const data = await bdcResponse.json();
-      const bdcName = [
-        data.city || data.locality || data.principalSubdivision,
-        data.principalSubdivision || data.countryName,
-      ]
-        .filter(Boolean)
-        .join(", ");
-      if (bdcName && !isGenericExportLocationName(bdcName)) {
-        saveLastKnownLocation(lat, lng, bdcName);
-        return bdcName;
-      }
-    }
-  } catch (_) {}
-
-  try {
     const nominatimResponse = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
-      { headers: { Accept: "application/json" } }
+      { headers: { "Accept-Language": "en", Accept: "application/json" } }
     );
     if (nominatimResponse.ok) {
       const data = await nominatimResponse.json();
-      const address = data?.display_name || "";
-      if (address && !isGenericExportLocationName(address)) {
-        saveLastKnownLocation(lat, lng, address);
-        return address;
+      const addr = data?.address || {};
+      const place = addr.city || addr.town || addr.village || addr.suburb || addr.county || "";
+      const state = addr.state || "";
+      const resolved = [place, state].filter(Boolean).join(", ") || data.display_name || "";
+      if (resolved && !isGenericExportLocationName(resolved)) {
+        saveLastKnownLocation(lat, lng, resolved);
+        return resolved;
       }
     }
   } catch (_) {}
@@ -2136,6 +2260,165 @@ function parseDateInput(dateValue) {
   const parsed = new Date(year, month - 1, day);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
+}
+
+function formatDateForDisplay(isoValue) {
+  const parsed = parseDateInput(isoValue);
+  if (!parsed) return "";
+  const dd = String(parsed.getDate()).padStart(2, "0");
+  const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+  const yyyy = parsed.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function ensureScheduleDatePickerModal() {
+  let modal = document.getElementById("agniCalendarModal");
+  if (modal) return modal;
+
+  modal = document.createElement("div");
+  modal.id = "agniCalendarModal";
+  modal.className = "agni-calendar-modal";
+  modal.innerHTML = `
+    <div class="agni-calendar-card" role="dialog" aria-modal="true" aria-label="Select date">
+      <div class="agni-calendar-header">
+        <button type="button" class="agni-calendar-nav" id="agniCalendarPrev" aria-label="Previous month">‹</button>
+        <div class="agni-calendar-title" id="agniCalendarTitle"></div>
+        <button type="button" class="agni-calendar-nav" id="agniCalendarNext" aria-label="Next month">›</button>
+      </div>
+      <div class="agni-calendar-weekdays">
+        <div>Su</div><div>Mo</div><div>Tu</div><div>We</div><div>Th</div><div>Fr</div><div>Sa</div>
+      </div>
+      <div class="agni-calendar-grid" id="agniCalendarGrid"></div>
+      <div class="agni-calendar-footer">
+        <button type="button" class="agni-calendar-cancel" id="agniCalendarCancel">Cancel</button>
+        <button type="button" class="agni-calendar-apply" id="agniCalendarApply">Apply</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function openThemedDatePicker({
+  input,
+  initialIso,
+  minIso,
+  maxIso,
+  onApply,
+}) {
+  const modal = ensureScheduleDatePickerModal();
+  const titleNode = document.getElementById("agniCalendarTitle");
+  const gridNode = document.getElementById("agniCalendarGrid");
+  const prevBtn = document.getElementById("agniCalendarPrev");
+  const nextBtn = document.getElementById("agniCalendarNext");
+  const cancelBtn = document.getElementById("agniCalendarCancel");
+  const applyBtn = document.getElementById("agniCalendarApply");
+  if (!titleNode || !gridNode || !prevBtn || !nextBtn || !cancelBtn || !applyBtn) return;
+
+  const minDate = parseDateInput(minIso);
+  const maxDate = parseDateInput(maxIso);
+  const selected = parseDateInput(initialIso) || new Date();
+  selected.setHours(0, 0, 0, 0);
+  let workingSelected = new Date(selected);
+  let monthCursor = new Date(selected.getFullYear(), selected.getMonth(), 1);
+
+  const toIso = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate()
+    ).padStart(2, "0")}`;
+  const inRange = (d) => {
+    if (minDate && d < minDate) return false;
+    if (maxDate && d > maxDate) return false;
+    return true;
+  };
+
+  const render = () => {
+    titleNode.textContent = monthCursor.toLocaleString("en-IN", {
+      month: "long",
+      year: "numeric",
+    });
+    gridNode.innerHTML = "";
+    const firstWeekday = new Date(
+      monthCursor.getFullYear(),
+      monthCursor.getMonth(),
+      1
+    ).getDay();
+    const daysInMonth = new Date(
+      monthCursor.getFullYear(),
+      monthCursor.getMonth() + 1,
+      0
+    ).getDate();
+
+    for (let i = 0; i < firstWeekday; i += 1) {
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "agni-calendar-day is-outside";
+      cell.disabled = true;
+      cell.textContent = "";
+      gridNode.appendChild(cell);
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const d = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), day);
+      d.setHours(0, 0, 0, 0);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "agni-calendar-day";
+      btn.textContent = String(day);
+      if (!inRange(d)) btn.disabled = true;
+      if (d.getTime() === today.getTime()) btn.classList.add("is-today");
+      if (d.getTime() === workingSelected.getTime()) btn.classList.add("is-selected");
+      btn.addEventListener("click", () => {
+        workingSelected = d;
+        render();
+      });
+      gridNode.appendChild(btn);
+    }
+  };
+
+  const close = () => {
+    modal.classList.remove("is-open");
+    prevBtn.removeEventListener("click", onPrev);
+    nextBtn.removeEventListener("click", onNext);
+    cancelBtn.removeEventListener("click", onCancel);
+    applyBtn.removeEventListener("click", onApplyClick);
+    modal.removeEventListener("click", onBackdrop);
+    window.removeEventListener("keydown", onEscapeClose);
+  };
+
+  const onPrev = () => {
+    monthCursor = new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1);
+    render();
+  };
+  const onNext = () => {
+    monthCursor = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1);
+    render();
+  };
+  const onCancel = () => close();
+  const onApplyClick = () => {
+    const iso = toIso(workingSelected);
+    input.dataset.isoValue = iso;
+    input.value = formatDateForDisplay(iso);
+    onApply?.(iso);
+    close();
+  };
+  const onBackdrop = (event) => {
+    if (event.target === modal) close();
+  };
+  const onEscapeClose = (event) => {
+    if (event.key === "Escape") close();
+  };
+
+  prevBtn.addEventListener("click", onPrev);
+  nextBtn.addEventListener("click", onNext);
+  cancelBtn.addEventListener("click", onCancel);
+  applyBtn.addEventListener("click", onApplyClick);
+  modal.addEventListener("click", onBackdrop);
+  window.addEventListener("keydown", onEscapeClose);
+  render();
+  modal.classList.add("is-open");
 }
 
 async function buildRangeTimingRows(startDateValue, endDateValue) {
@@ -2243,34 +2526,144 @@ function blobToBase64Payload(blob) {
   });
 }
 
+function getExportCoordinateKey(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(5) : "unknown";
+}
+
+function getExportLocationKey(location) {
+  const latKey = getExportCoordinateKey(location?.lat);
+  const lngKey = getExportCoordinateKey(location?.lng);
+  return `lat${latKey.replace(".", "_")}-lng${lngKey.replace(".", "_")}`;
+}
+
+function buildExportIdentity(kind, startValue, endValue, location) {
+  const latKey = getExportCoordinateKey(location?.lat);
+  const lngKey = getExportCoordinateKey(location?.lng);
+  return {
+    kind,
+    startDate: startValue,
+    endDate: endValue,
+    latKey,
+    lngKey,
+    locationKey: getExportLocationKey(location),
+    exportKey: `${kind}|${startValue}|${endValue}|${latKey}|${lngKey}`,
+  };
+}
+
 function saveExportRegistryEntry(entry) {
   try {
     const raw = localStorage.getItem(EXPORT_FILE_REGISTRY_KEY);
     const registry = raw ? JSON.parse(raw) : {};
-    registry[entry.filename] = {
+    const registryKey = entry.exportKey || entry.filename;
+    registry[registryKey] = {
       filename: entry.filename,
       path: entry.path || null,
+      directory: entry.directory || EXPORT_NATIVE_DIRECTORY,
       uri: entry.uri || null,
       mime: entry.mime || null,
       bytes: Number(entry.bytes) || 0,
+      exportKey: entry.exportKey || null,
+      kind: entry.kind || null,
+      startDate: entry.startDate || null,
+      endDate: entry.endDate || null,
+      latKey: entry.latKey || null,
+      lngKey: entry.lngKey || null,
+      locationKey: entry.locationKey || null,
       savedAt: Date.now(),
     };
     localStorage.setItem(EXPORT_FILE_REGISTRY_KEY, JSON.stringify(registry));
   } catch (_) {}
 }
 
-function getExportRegistryEntry(filename) {
+function getExportRegistryEntry(filename, exportKey = null) {
   try {
     const raw = localStorage.getItem(EXPORT_FILE_REGISTRY_KEY);
     if (!raw) return null;
     const registry = JSON.parse(raw);
+    if (exportKey && registry?.[exportKey]) return registry[exportKey];
     return registry?.[filename] || null;
   } catch (_) {
     return null;
   }
 }
 
-async function saveFileInNativeStorage(blob, filename, mime) {
+async function findExistingNativeExportEntry(exportKey) {
+  if (!exportKey) return null;
+  let entry = null;
+  try {
+    const raw = localStorage.getItem(EXPORT_FILE_REGISTRY_KEY);
+    if (!raw) return null;
+    const registry = JSON.parse(raw);
+    entry = registry?.[exportKey] || null;
+  } catch (_) {
+    return null;
+  }
+  if (!entry || !entry.path) return null;
+  if (!isNativeAppRuntime()) return entry;
+  const filesystem = window.Capacitor?.Plugins?.Filesystem;
+  if (!filesystem?.stat) return entry;
+  try {
+    await filesystem.stat({
+      path: entry.path,
+      directory: entry.directory || EXPORT_NATIVE_DIRECTORY,
+    });
+    exportLog("native-existing-export-found", {
+      exportKey,
+      path: entry.path,
+      filename: entry.filename,
+    });
+    return entry;
+  } catch (error) {
+    exportLog("native-existing-export-missing-on-disk", {
+      exportKey,
+      path: entry.path,
+      error: error?.message || String(error),
+    });
+    return null;
+  }
+}
+
+async function deleteExistingNativeExport(exportKey) {
+  if (!isNativeAppRuntime() || !exportKey) return;
+  const filesystem = window.Capacitor?.Plugins?.Filesystem;
+  if (!filesystem?.deleteFile) return;
+  try {
+    const raw = localStorage.getItem(EXPORT_FILE_REGISTRY_KEY);
+    if (!raw) return;
+    const registry = JSON.parse(raw);
+    const entries = Object.entries(registry || {}).filter(
+      ([, item]) => item?.exportKey === exportKey && item?.path
+    );
+    for (const [registryKey, entry] of entries) {
+      try {
+        await filesystem.deleteFile({
+          path: entry.path,
+          directory: entry.directory || EXPORT_NATIVE_DIRECTORY,
+        });
+        exportLog("native-existing-export-deleted", {
+          exportKey,
+          path: entry.path,
+        });
+      } catch (error) {
+        exportLog("native-existing-export-delete-skipped", {
+          exportKey,
+          path: entry.path,
+          error: error?.message || String(error),
+        });
+      }
+      delete registry[registryKey];
+    }
+    localStorage.setItem(EXPORT_FILE_REGISTRY_KEY, JSON.stringify(registry));
+  } catch (error) {
+    exportLog("native-existing-export-delete-failed", {
+      exportKey,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+async function saveFileInNativeStorage(blob, filename, mime, metadata = {}) {
   if (!isNativeAppRuntime()) return null;
   const filesystem = window.Capacitor?.Plugins?.Filesystem;
   if (!filesystem?.writeFile) {
@@ -2278,30 +2671,34 @@ async function saveFileInNativeStorage(blob, filename, mime) {
     return null;
   }
 
-  const path = `EternalAgniExports/${filename}`;
+  const path = `EternalAgniExports/${metadata.locationKey || "current-location"}/${filename}`;
+  await deleteExistingNativeExport(metadata.exportKey);
   exportLog("native-save-start", {
     filename,
     path,
     bytes: blob.size,
     mime,
+    exportKey: metadata.exportKey || null,
   });
   const base64Payload = await blobToBase64Payload(blob);
   await filesystem.writeFile({
     path,
     data: base64Payload,
-    directory: "DOCUMENTS",
+    directory: EXPORT_NATIVE_DIRECTORY,
     recursive: true,
   });
   const uriResult = await filesystem.getUri({
     path,
-    directory: "DOCUMENTS",
+    directory: EXPORT_NATIVE_DIRECTORY,
   });
   const saved = {
     filename,
     path,
+    directory: EXPORT_NATIVE_DIRECTORY,
     uri: uriResult?.uri || null,
     mime,
     bytes: blob.size,
+    ...metadata,
   };
   saveExportRegistryEntry(saved);
   exportLog("native-save-complete", {
@@ -2315,15 +2712,18 @@ async function saveFileInNativeStorage(blob, filename, mime) {
 
 async function openExportFileFromNotification(extra = {}) {
   const filename = extra?.fileName || extra?.filename || null;
+  const exportKey = extra?.exportKey || null;
   let fileUri = extra?.fileUri || extra?.uri || null;
   let filePath = extra?.filePath || extra?.path || null;
+  let fileDirectory = extra?.fileDirectory || extra?.directory || EXPORT_NATIVE_DIRECTORY;
   const mime = extra?.mime || null;
 
   if (filename && (!fileUri || !filePath)) {
-    const fromRegistry = getExportRegistryEntry(filename);
+    const fromRegistry = getExportRegistryEntry(filename, exportKey);
     if (fromRegistry) {
       fileUri = fileUri || fromRegistry.uri;
       filePath = filePath || fromRegistry.path;
+      fileDirectory = fromRegistry.directory || fileDirectory;
     }
   }
 
@@ -2333,7 +2733,7 @@ async function openExportFileFromNotification(extra = {}) {
       if (filesystem?.getUri) {
         const uriResult = await filesystem.getUri({
           path: filePath,
-          directory: "DOCUMENTS",
+          directory: fileDirectory,
         });
         fileUri = uriResult?.uri || null;
       }
@@ -2416,9 +2816,28 @@ async function notifyNativeExportReady(savedFile, syncedMessage = "") {
     return { scheduled: false };
   }
 
-  // Keep export notifications on a dedicated channel with Android default sound.
-  // Do not set custom sound here, otherwise it inherits the Agnihotra bell channel.
+  // Keep export notifications on a dedicated channel. The Capacitor plugin is
+  // patched so that when this channel is created without an explicit `sound`,
+  // it falls back to Android's default notification sound — required for
+  // heads-up popups on Android 15 / ColorOS / MIUI.
   if (typeof localNotifications.createChannel === "function") {
+    // Tear down older stale channels so they don't accumulate in the user's
+    // notification settings. Channel settings are immutable after creation,
+    // so we rev the channel id whenever its config changes.
+    if (typeof localNotifications.deleteChannel === "function") {
+      const staleChannelIds = [
+        "agnihotra-export-headsup",
+        "agnihotra-export-headsup-v1",
+        "agnihotra-export-headsup-v2",
+        "agnihotra-export-headsup-v3",
+        "agnihotra-export-headsup-v4",
+      ].filter((id) => id !== EXPORT_NOTIFICATION_CHANNEL_ID);
+      for (const staleId of staleChannelIds) {
+        try {
+          await localNotifications.deleteChannel({ id: staleId });
+        } catch (_) {}
+      }
+    }
     try {
       await localNotifications.createChannel({
         id: EXPORT_NOTIFICATION_CHANNEL_ID,
@@ -2440,18 +2859,39 @@ async function notifyNativeExportReady(savedFile, syncedMessage = "") {
     }
   }
 
+  // Cancel any previously-posted export notification so Android does not
+  // suppress this one due to Android 15 "notification cooldown" rate-limiting
+  // applied to the same notification id.
+  if (
+    typeof window.__agnihotraLastExportNotificationId === "number" &&
+    typeof localNotifications.cancel === "function"
+  ) {
+    const prevId = window.__agnihotraLastExportNotificationId;
+    try {
+      await localNotifications.cancel({
+        notifications: [{ id: prevId }],
+      });
+      exportLog("export-ready-prev-cancelled", { prevId });
+    } catch (error) {
+      exportLog("export-ready-prev-cancel-failed", {
+        prevId,
+        error: error?.message || String(error),
+      });
+    }
+  }
+
   const id = Math.floor(Date.now() % 1000000000);
   const sentAtMs = Date.now();
-  const scheduledForMs = sentAtMs + 80;
+  const scheduledForMs = sentAtMs;
   const messageForUser =
     syncedMessage || `${savedFile.filename} saved. Tap to open.`;
+  window.__agnihotraLastExportNotificationId = id;
   await localNotifications.schedule({
     notifications: [
       {
         id,
         title: "EternalAgni Export Ready",
         body: messageForUser,
-        schedule: { at: new Date(scheduledForMs) },
         ongoing: false,
         autoCancel: true,
         allowWhileIdle: true,
@@ -2465,6 +2905,8 @@ async function notifyNativeExportReady(savedFile, syncedMessage = "") {
           fileName: savedFile.filename,
           filePath: savedFile.path,
           fileUri: savedFile.uri,
+          fileDirectory: savedFile.directory || EXPORT_NATIVE_DIRECTORY,
+          exportKey: savedFile.exportKey || null,
           mime: savedFile.mime,
         },
       },
@@ -2548,11 +2990,11 @@ function setupExportNotificationClickHandler() {
   exportLog("export-ready-notification-listener-bound");
 }
 
-async function tryShareOrDownload(blob, filename, mime) {
+async function tryShareOrDownload(blob, filename, mime, metadata = {}) {
   let nativeSaved = null;
   if (isNativeAppRuntime()) {
     try {
-      nativeSaved = await saveFileInNativeStorage(blob, filename, mime);
+      nativeSaved = await saveFileInNativeStorage(blob, filename, mime, metadata);
       if (nativeSaved) {
         const notificationMeta = await notifyNativeExportReady(
           nativeSaved,
@@ -2582,7 +3024,8 @@ async function exportMonthAsPdf(
   rows,
   filename,
   locationName,
-  rangeLabel
+  rangeLabel,
+  metadata = {}
 ) {
   exportLog("pdf-start", {
     filename,
@@ -2604,7 +3047,7 @@ async function exportMonthAsPdf(
     locationName,
     rangeLabel,
   });
-  const result = await tryShareOrDownload(blob, filename, "application/pdf");
+  const result = await tryShareOrDownload(blob, filename, "application/pdf", metadata);
   exportLog("pdf-complete", {
     filename,
     mode: result.mode,
@@ -2627,19 +3070,100 @@ function setupScheduleExportControls() {
   const oneYearFromNow = new Date(today);
   oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
 
-  startDateInput.min = formatDateInputValue(startOfCurrentYear);
-  endDateInput.max = formatDateInputValue(oneYearFromNow);
+  const minIso = formatDateInputValue(startOfCurrentYear);
+  const maxIso = formatDateInputValue(oneYearFromNow);
+  startDateInput.dataset.minIso = minIso;
+  startDateInput.dataset.maxIso = maxIso;
+  endDateInput.dataset.minIso = minIso;
+  endDateInput.dataset.maxIso = maxIso;
 
   const firstDayCurrentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
   const lastDayCurrentMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-  startDateInput.value = formatDateInputValue(firstDayCurrentMonth);
-  endDateInput.value = formatDateInputValue(lastDayCurrentMonth);
-  endDateInput.min = startDateInput.value;
+  const startDefaultIso = formatDateInputValue(firstDayCurrentMonth);
+  const endDefaultIso = formatDateInputValue(lastDayCurrentMonth);
+  startDateInput.dataset.isoValue = startDefaultIso;
+  endDateInput.dataset.isoValue = endDefaultIso;
+  startDateInput.value = formatDateForDisplay(startDefaultIso);
+  endDateInput.value = formatDateForDisplay(endDefaultIso);
+  startDateInput.dataset.lastValidValue = startDefaultIso;
+  endDateInput.dataset.lastValidValue = endDefaultIso;
 
-  startDateInput.addEventListener("change", () => {
-    endDateInput.min = startDateInput.value || startDateInput.min;
-    if (endDateInput.value && startDateInput.value && endDateInput.value < startDateInput.value) {
-      endDateInput.value = startDateInput.value;
+  const restoreIfCleared = (input, fallbackValue) => {
+    const iso = input.dataset.isoValue || "";
+    if (iso) {
+      input.dataset.lastValidValue = iso;
+      return false;
+    }
+    const restored = input.dataset.lastValidValue || fallbackValue || "";
+    input.dataset.isoValue = restored;
+    input.value = formatDateForDisplay(restored);
+    return true;
+  };
+
+  const handleStartSelection = () => {
+    const wasCleared = restoreIfCleared(startDateInput, startDefaultIso);
+    if (wasCleared) {
+      setScheduleExportStatus("Start date cannot be cleared.", true);
+    }
+    endDateInput.dataset.minIso = startDateInput.dataset.isoValue || minIso;
+    if (
+      endDateInput.dataset.isoValue &&
+      startDateInput.dataset.isoValue &&
+      endDateInput.dataset.isoValue < startDateInput.dataset.isoValue
+    ) {
+      endDateInput.dataset.isoValue = startDateInput.dataset.isoValue;
+      endDateInput.value = formatDateForDisplay(endDateInput.dataset.isoValue);
+      endDateInput.dataset.lastValidValue = endDateInput.dataset.isoValue;
+    }
+  };
+
+  const handleEndSelection = () => {
+    const wasCleared = restoreIfCleared(endDateInput, endDefaultIso);
+    if (wasCleared) {
+      setScheduleExportStatus("End date cannot be cleared.", true);
+    }
+    if (endDateInput.dataset.isoValue < startDateInput.dataset.isoValue) {
+      endDateInput.dataset.isoValue = startDateInput.dataset.isoValue;
+      endDateInput.value = formatDateForDisplay(endDateInput.dataset.isoValue);
+    }
+    endDateInput.dataset.lastValidValue = endDateInput.dataset.isoValue;
+  };
+
+  startDateInput.addEventListener("click", () => {
+    openThemedDatePicker({
+      input: startDateInput,
+      initialIso: startDateInput.dataset.isoValue || startDefaultIso,
+      minIso: startDateInput.dataset.minIso || minIso,
+      maxIso: startDateInput.dataset.maxIso || maxIso,
+      onApply: (iso) => {
+        startDateInput.dataset.isoValue = iso;
+        handleStartSelection();
+      },
+    });
+  });
+  startDateInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      startDateInput.click();
+    }
+  });
+
+  endDateInput.addEventListener("click", () => {
+    openThemedDatePicker({
+      input: endDateInput,
+      initialIso: endDateInput.dataset.isoValue || endDefaultIso,
+      minIso: endDateInput.dataset.minIso || startDateInput.dataset.isoValue || minIso,
+      maxIso: endDateInput.dataset.maxIso || maxIso,
+      onApply: (iso) => {
+        endDateInput.dataset.isoValue = iso;
+        handleEndSelection();
+      },
+    });
+  });
+  endDateInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      endDateInput.click();
     }
   });
 
@@ -2670,8 +3194,8 @@ function setupScheduleExportControls() {
 
   const runExport = async (kind) => {
     exportLog("trigger", { kind });
-    const startValue = startDateInput.value;
-    const endValue = endDateInput.value;
+    const startValue = startDateInput.dataset.isoValue || "";
+    const endValue = endDateInput.dataset.isoValue || "";
     if (!startValue || !endValue) {
       setScheduleExportStatus(
         t("schedule.export.selectRangeError", "Please select start and end dates."),
@@ -2680,7 +3204,7 @@ function setupScheduleExportControls() {
       return;
     }
 
-    if (startValue < startDateInput.min) {
+    if (startValue < minIso) {
       setScheduleExportStatus(
         t(
           "schedule.export.startMinError",
@@ -2691,7 +3215,7 @@ function setupScheduleExportControls() {
       return;
     }
 
-    if (endValue > endDateInput.max) {
+    if (endValue > maxIso) {
       setScheduleExportStatus(
         t(
           "schedule.export.endMaxError",
@@ -2727,11 +3251,58 @@ function setupScheduleExportControls() {
       const locationName = resolveExportLocationName(built.exportLocation.locationName);
       const safeRange = `${startValue.replace(/-/g, "")}-${endValue.replace(/-/g, "")}`;
       const rangeLabel = `${startValue} to ${endValue}`;
+      const exportIdentity = buildExportIdentity(
+        kind,
+        startValue,
+        endValue,
+        built.exportLocation
+      );
+
+      // If a file with the same kind + date range + lat/lng already exists on
+      // disk, skip regeneration and just re-fire the notification + toast.
+      // Toast and notification fire together because there is no PDF/ICS
+      // generation delay between them.
+      const existingExport = await findExistingNativeExportEntry(
+        exportIdentity.exportKey
+      );
+      if (existingExport && existingExport.filename) {
+        const savedFile = {
+          filename: existingExport.filename,
+          path: existingExport.path,
+          directory: existingExport.directory || EXPORT_NATIVE_DIRECTORY,
+          uri: existingExport.uri,
+          mime:
+            existingExport.mime ||
+            (kind === "ics" ? "text/calendar" : "application/pdf"),
+          bytes: existingExport.bytes || 0,
+          ...exportIdentity,
+        };
+        const reuseMessage = kind === "ics" ? "ICS saved" : "PDF saved";
+        const notificationMeta = await notifyNativeExportReady(
+          savedFile,
+          `${savedFile.filename} saved. Tap to open.`
+        );
+        exportLog("export-reused-existing", {
+          kind,
+          exportKey: exportIdentity.exportKey,
+          filename: savedFile.filename,
+          notificationId: notificationMeta?.notificationId || null,
+        });
+        setScheduleExportStatus(reuseMessage);
+        showInstantExportFeedback(reuseMessage);
+        return;
+      }
+
       if (kind === "ics") {
         const filename = `agnihotra-${safeRange}.ics`;
         const icsContent = buildIcsContent(built.rows, locationName);
         const blob = new Blob([icsContent], { type: "text/calendar;charset=utf-8" });
-        const exportResult = await tryShareOrDownload(blob, filename, "text/calendar");
+        const exportResult = await tryShareOrDownload(
+          blob,
+          filename,
+          "text/calendar",
+          exportIdentity
+        );
         exportLog("ics-complete", {
           filename,
           mode: exportResult.mode,
@@ -2741,37 +3312,16 @@ function setupScheduleExportControls() {
         });
         const successMessage =
           exportResult.mode === "native-saved"
-              ? "✅ ICS saved"
-              : `✅ ICS downloaded: ${filename}. Check your Downloads folder.`;
+              ? "ICS saved"
+              : `ICS ready: ${filename}. Check your Downloads folder.`;
         if (exportResult?.notificationId) {
-          setScheduleExportStatus("Waiting for export notification...");
-          const timeoutMs = Math.max(
-            2000,
-            Math.min(
-              7000,
-              Number(exportResult.notificationScheduledForMs || 0) - Date.now() + 4500
-            )
-          );
-          exportLog("ui-wait-notification-popup", {
+          setScheduleExportStatus(successMessage);
+          showInstantExportFeedback(successMessage);
+          exportLog("ui-feedback-synced-with-notification", {
             kind: "ics",
             notificationId: exportResult.notificationId,
-            timeoutMs,
+            shownAtMs: Date.now(),
           });
-          const receipt = await waitForExportNotificationReceipt(
-            exportResult.notificationId,
-            timeoutMs
-          );
-          exportLog("ui-wait-notification-popup-done", {
-            kind: "ics",
-            notificationId: exportResult.notificationId,
-            ...receipt,
-          });
-          if (receipt?.received) {
-            setScheduleExportStatus(successMessage);
-            showInstantExportFeedback(successMessage);
-          } else {
-            setScheduleExportStatus("ICS generated. Waiting for notification popup.");
-          }
         } else {
           setScheduleExportStatus(successMessage);
           showInstantExportFeedback(successMessage);
@@ -2782,41 +3332,21 @@ function setupScheduleExportControls() {
           built.rows,
           filename,
           locationName,
-          rangeLabel
+          rangeLabel,
+          exportIdentity
         );
         const pdfMessage =
           exportResult?.mode === "native-saved"
-            ? "✅ PDF saved"
-            : `✅ PDF ready: ${filename}. If not visible in app, check device Downloads/Files.`;
+            ? "PDF saved"
+            : `PDF ready: ${filename}. If not visible in app, check device Downloads/Files.`;
         if (exportResult?.notificationId) {
-          setScheduleExportStatus("Waiting for export notification...");
-          const timeoutMs = Math.max(
-            2000,
-            Math.min(
-              7000,
-              Number(exportResult.notificationScheduledForMs || 0) - Date.now() + 4500
-            )
-          );
-          exportLog("ui-wait-notification-popup", {
+          setScheduleExportStatus(pdfMessage);
+          showInstantExportFeedback(pdfMessage);
+          exportLog("ui-feedback-synced-with-notification", {
             kind: "pdf",
             notificationId: exportResult.notificationId,
-            timeoutMs,
+            shownAtMs: Date.now(),
           });
-          const receipt = await waitForExportNotificationReceipt(
-            exportResult.notificationId,
-            timeoutMs
-          );
-          exportLog("ui-wait-notification-popup-done", {
-            kind: "pdf",
-            notificationId: exportResult.notificationId,
-            ...receipt,
-          });
-          if (receipt?.received) {
-            setScheduleExportStatus(pdfMessage);
-            showInstantExportFeedback(pdfMessage);
-          } else {
-            setScheduleExportStatus("PDF generated. Waiting for notification popup.");
-          }
         } else {
           setScheduleExportStatus(pdfMessage);
           showInstantExportFeedback(pdfMessage);
@@ -2831,7 +3361,7 @@ function setupScheduleExportControls() {
         t("schedule.export.failed", "Export failed. Please try again."),
         true
       );
-      showInstantExportFeedback("❌ Export failed. Check logs and try again.", true);
+      showInstantExportFeedback("Export failed. Check logs and try again.", true);
     } finally {
       setExportButtonsBusy(false, kind);
     }
@@ -2841,10 +3371,217 @@ function setupScheduleExportControls() {
   icsBtn.addEventListener("click", () => runExport("ics"));
 }
 
-function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
-  const element = document.getElementById(elementId);
-  const currentTime = Date.now();
+function refreshVisibleTimingBlocks() {
+  try {
+    const cacheRaw = localStorage.getItem(CACHE_KEY);
+    if (!cacheRaw) return;
+    const cache = JSON.parse(cacheRaw);
+    const timings = cache?.timings;
+    if (!timings || typeof timings !== "object") return;
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    const todayKey = formatDateToDDMMYYYY(today);
+    const tomorrowKey = formatDateToDDMMYYYY(tomorrow);
+    const todayRow = timings[todayKey];
+    const tomorrowRow = timings[tomorrowKey];
+    if (todayRow?.sunrise && todayRow?.sunset) {
+      displaySunriseSunset(
+        {
+          date: todayKey,
+          sunrise: todayRow.sunrise,
+          sunset: todayRow.sunset,
+        },
+        "todayTimes"
+      );
+    }
+    if (tomorrowRow?.sunrise && tomorrowRow?.sunset) {
+      displaySunriseSunset(
+        {
+          date: tomorrowKey,
+          sunrise: tomorrowRow.sunrise,
+          sunset: tomorrowRow.sunset,
+        },
+        "tomorrowTimes"
+      );
+    }
+    displayFullSchedule(timings);
+    if (todayRow && tomorrowRow) {
+      displayUpcomingTimings(
+        {
+          date: todayKey,
+          sunrise: todayRow.sunrise,
+          sunset: todayRow.sunset,
+        },
+        {
+          date: tomorrowKey,
+          sunrise: tomorrowRow.sunrise,
+          sunset: tomorrowRow.sunset,
+        },
+        "upcomingTimes"
+      );
+    } else {
+      requestUpcomingEventsRefresh("settings-time-format-updated");
+    }
+  } catch (_) {
+    requestUpcomingEventsRefresh("settings-time-format-updated-fallback");
+  }
+}
 
+function setSupportLogExportStatus(message, isError = false) {
+  const statusNode = document.getElementById("supportLogExportStatus");
+  if (!statusNode) return;
+  statusNode.textContent = message || "";
+  statusNode.style.color = isError ? "#9c1d1d" : "#5d3414";
+}
+
+async function buildSupportLogExportPayload(reason = "manual") {
+  pruneSupportLogsInMemory();
+
+  // Prefer the unified comprehensive builder when available — it captures
+  // every relevant slice of state (device / permissions / channels / pending
+  // / location / timing / lifecycle / errors / logs). Fall back to the
+  // legacy minimal shape if the module didn't load for some reason.
+  if (window.AgnihotraSupportPayload?.build) {
+    try {
+      return await window.AgnihotraSupportPayload.build({
+        logs: supportLogEntries.slice(-750),
+        reason,
+        ctx: supportDiagnosticsContext,
+      });
+    } catch (error) {
+      console.warn("[AGNIHOTRA][SUPPORT] payload-builder-failed", error);
+    }
+  }
+
+  return {
+    schemaVersion: "1.0",
+    generatedAt: new Date().toISOString(),
+    appRelease: window.AGNI_RUNTIME_CONFIG?.appRelease || "unknown",
+    appEnvironment: window.AGNI_RUNTIME_CONFIG?.appEnvironment || "unknown",
+    language: currentLanguage,
+    timeFormat: currentTimeFormatPreference,
+    installId: ensureSupportInstallId(),
+    sessionId: getSupportSessionId(),
+    locationMeta: window.__agnihotraLastLocationMeta || null,
+    cacheDiagnostics: getTimingCacheDiagnostics(),
+    logCount: supportLogEntries.length,
+    logs: supportLogEntries.slice(-500),
+  };
+}
+
+async function exportSupportLogsFromSettings() {
+  const payload = await buildSupportLogExportPayload("export-from-settings");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `agnihotra-support-report-${stamp}.json`;
+  const content = JSON.stringify(payload, null, 2);
+  const mime = "application/json";
+  const blob = new Blob([content], { type: mime });
+  const file = new File([blob], filename, { type: mime });
+
+  try {
+    if (
+      navigator.share &&
+      navigator.canShare &&
+      navigator.canShare({ files: [file] })
+    ) {
+      await navigator.share({
+        title: "Agnihotra support report",
+        text: "Support report for debugging reminder/timing issues.",
+        files: [file],
+      });
+      setSupportLogExportStatus("Support report shared successfully.");
+      captureDiagnosticBreadcrumb("support", "report-shared", { filename }, "info");
+      return;
+    }
+  } catch (error) {
+    captureDiagnosticException(error, "support-report-share-failed", { filename });
+  }
+
+  triggerDownload(blob, filename);
+  setSupportLogExportStatus("Support report downloaded. Please share this file.");
+  captureDiagnosticBreadcrumb("support", "report-downloaded", { filename }, "info");
+}
+
+function openSupportEmailDraft() {
+  const subject = "Agnihotra App Support Report";
+  const bodyLines = [
+    "Hello Support Team,",
+    "",
+    "I am facing an issue in the Agnihotra app.",
+    "",
+    "Issue summary:",
+    "-",
+    "",
+    "Steps to reproduce:",
+    "1)",
+    "2)",
+    "",
+    "Please find attached:",
+    "- support report file",
+    "- screenshot (if available)",
+    "",
+    "Device details:",
+    `- App release: ${window.AGNI_RUNTIME_CONFIG?.appRelease || "unknown"}`,
+    `- Language: ${currentLanguage}`,
+    `- Time format: ${currentTimeFormatPreference}`,
+    "",
+    "Thank you.",
+  ];
+  const mailto = `mailto:kanchanlatakrishna@gmail.com?subject=${encodeURIComponent(
+    subject
+  )}&body=${encodeURIComponent(bodyLines.join("\n"))}`;
+  window.location.href = mailto;
+}
+
+function setupSettingsPanel() {
+  const formatButtons = Array.from(document.querySelectorAll("[data-time-format]"));
+  const exportBtn = document.getElementById("exportSupportLogsBtn");
+  const emailBtn = document.getElementById("emailSupportBtn");
+  if (!formatButtons.length || !exportBtn || !emailBtn) return;
+
+  const syncTimeFormatUi = () => {
+    formatButtons.forEach((button) => {
+      const selected = button.getAttribute("data-time-format") === currentTimeFormatPreference;
+      button.classList.toggle("is-active", selected);
+      button.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
+  };
+
+  syncTimeFormatUi();
+
+  formatButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextFormat = button.getAttribute("data-time-format");
+      if (nextFormat !== "ampm" && nextFormat !== "24h") return;
+      currentTimeFormatPreference = nextFormat;
+      localStorage.setItem(TIME_FORMAT_STORAGE_KEY, nextFormat);
+      syncTimeFormatUi();
+      refreshVisibleTimingBlocks();
+      captureDiagnosticBreadcrumb("settings", "time-format-updated", { nextFormat }, "info");
+    });
+  });
+
+  exportBtn.addEventListener("click", async () => {
+    exportBtn.disabled = true;
+    setSupportLogExportStatus("Preparing support report...");
+    try {
+      await exportSupportLogsFromSettings();
+    } catch (error) {
+      setSupportLogExportStatus("Unable to create support report. Try again.", true);
+      captureDiagnosticException(error, "support-report-export-failed");
+    } finally {
+      exportBtn.disabled = false;
+    }
+  });
+
+  emailBtn.addEventListener("click", () => {
+    openSupportEmailDraft();
+    setSupportLogExportStatus("Email draft opened. Attach report/screenshot and send.");
+  });
+}
+
+function buildUpcomingEvents(todayResults, tomorrowResults, currentTime = Date.now()) {
   // Parse the date format DD.MM.YYYY and time format HH:MM:SS
   const todaySunriseTime = parseDateTime(
     todayResults.date,
@@ -2859,11 +3596,6 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
     tomorrowResults.date,
     tomorrowResults.sunset
   );
-
-  // Clear previous content and countdowns
-  element.innerHTML = "";
-  window.activeCountdowns = {}; // Clear all active countdowns
-  window.countdownLabels = {};
 
   // Find the next upcoming event(s) based on current time
   const upcomingEvents = [];
@@ -2913,22 +3645,115 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
     });
   }
 
-  // Display the upcoming events
-  upcomingEvents.forEach((eventItem) => {
+  return upcomingEvents;
+}
+
+function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
+  const element = document.getElementById(elementId);
+  const countdownElement = document.getElementById("upcomingCountdown");
+  const upcomingEvents = buildUpcomingEvents(todayResults, tomorrowResults);
+
+  // Clear previous content and countdowns
+  element.innerHTML = "";
+  if (countdownElement) countdownElement.innerHTML = "";
+  window.activeCountdowns = {}; // Clear all active countdowns
+  window.countdownLabels = {};
+
+  const nextEvent = upcomingEvents[0];
+  if (nextEvent && countdownElement) {
     displayCountdownAndTime(
+      countdownElement,
+      `${nextEvent.id}main`,
+      nextEvent.label,
+      nextEvent.time,
+      nextEvent.isSunrise,
+      true
+    );
+  }
+
+  // Display upcoming timings only — no countdown inside these two boxes
+  upcomingEvents.forEach((eventItem) => {
+    displayUpcomingTimeOnly(
       element,
-      eventItem.id,
       eventItem.label,
       eventItem.time,
-      eventItem.isSunrise
+      eventItem.isSunrise,
+      false
     );
   });
 
-  const nextEvent = upcomingEvents[0];
   if (nextEvent) {
     syncNativeHomescreenWidget(nextEvent);
   }
 
+}
+
+function refreshUpcomingTimeOnlyCardsFromCache(reason = "time-window-open") {
+  try {
+    const element = document.getElementById("upcomingTimes");
+    if (!element) return false;
+    const cacheRaw = localStorage.getItem(CACHE_KEY);
+    if (!cacheRaw) return false;
+    const cache = JSON.parse(cacheRaw);
+    const timings = cache?.timings;
+    if (!timings || typeof timings !== "object") return false;
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    const todayKey = formatDateToDDMMYYYY(today);
+    const tomorrowKey = formatDateToDDMMYYYY(tomorrow);
+    const todayRow = timings[todayKey];
+    const tomorrowRow = timings[tomorrowKey];
+    if (!todayRow?.sunrise || !todayRow?.sunset || !tomorrowRow?.sunrise || !tomorrowRow?.sunset) {
+      return false;
+    }
+    const upcomingEvents = buildUpcomingEvents(
+      {
+        date: todayKey,
+        sunrise: todayRow.sunrise,
+        sunset: todayRow.sunset,
+      },
+      {
+        date: tomorrowKey,
+        sunrise: tomorrowRow.sunrise,
+        sunset: tomorrowRow.sunset,
+      },
+      Date.now()
+    );
+    element.innerHTML = "";
+    upcomingEvents.forEach((eventItem) => {
+      displayUpcomingTimeOnly(
+        element,
+        eventItem.label,
+        eventItem.time,
+        eventItem.isSunrise,
+        false
+      );
+    });
+    if (upcomingEvents[0]) syncNativeHomescreenWidget(upcomingEvents[0]);
+    debugLog("upcoming-time-only:refreshed", { reason });
+    return true;
+  } catch (error) {
+    debugLog("upcoming-time-only:error", {
+      reason,
+      error: error?.message || String(error),
+    });
+    return false;
+  }
+}
+
+function displayUpcomingTimeOnly(element, label, time, isSunrise, isNext = false) {
+  const itemDiv = document.createElement("div");
+  itemDiv.className = "time-item time-item--simple" + (isNext ? " is-upcoming" : "");
+
+  const iconClass = isSunrise ? "fas fa-sun" : "fas fa-moon";
+  const iconColor = isSunrise ? "#FFD700" : "#4B0082";
+  itemDiv.innerHTML = `
+        <span class="time-label"><i class="${iconClass}" style="color: ${iconColor};"></i> ${label.toUpperCase()}</span>
+        <span class="time-value">${formatDateTimeToTimeOnly(time)}</span>
+    `;
+
+  element.appendChild(itemDiv);
 }
 
 async function syncNativeHomescreenWidget(nextEvent) {
@@ -2957,10 +3782,10 @@ function parseDateTime(dateStr, timeStr) {
   let day, month, year;
 
   if (dateStr.includes(".")) {
-    // DD.MM.YYYY format from homatherapie.de
+    // DD.MM.YYYY format (our engine output)
     [day, month, year] = dateStr.split(".").map(Number);
   } else if (dateStr.includes("-")) {
-    // YYYY-MM-DD format from sunrisesunset.io API
+    // YYYY-MM-DD format (ISO)
     [year, month, day] = dateStr.split("-").map(Number);
   } else {
     console.error("Unknown date format:", dateStr);
@@ -3028,8 +3853,22 @@ function parseDateTime(dateStr, timeStr) {
 window.activeCountdowns = window.activeCountdowns || {};
 window.countdownLabels = window.countdownLabels || {};
 window.playedAlerts = window.playedAlerts || new Set();
-const PRE_ALERT_MINUTES = 10;
+window.refreshedUpcomingTimeOnlyTargets = window.refreshedUpcomingTimeOnlyTargets || new Set();
+
+function getPreAlertMinutes() {
+  try {
+    const saved = localStorage.getItem("agnihotra_reminder_lead_v1");
+    if (saved === null) return 15;
+    const val = parseInt(saved, 10);
+    if (isNaN(val)) return 15;
+    return Math.max(2, Math.min(60, val));
+  } catch (_) {
+    return 15;
+  }
+}
+
 const ALERT_WINDOW_MS = 10000; // Trigger if app checks within 10s of target
+const ENABLE_NATIVE_ZERO_WINDOW_TING = true;
 
 // Persistent AudioContext to be initialized on user gesture. Unlocking it
 // also lets the @capacitor-community/native-audio plugin play immediately on
@@ -3113,9 +3952,9 @@ function setupScreenWakeLock() {
   }
 }
 
-function displayCountdownAndTime(element, id, label, time, isSunrise) {
+function displayCountdownAndTime(element, id, label, time, isSunrise, isNext = false) {
   const itemDiv = document.createElement("div");
-  itemDiv.className = "time-item";
+  itemDiv.className = `time-item ${isSunrise ? "time-item--sunrise" : "time-item--sunset"}` + (isNext ? " is-upcoming" : "");
 
   const uniqueId = id;
   const iconClass = isSunrise ? "fas fa-sun" : "fas fa-moon";
@@ -3126,8 +3965,9 @@ function displayCountdownAndTime(element, id, label, time, isSunrise) {
   });
 
   itemDiv.innerHTML = `
+        <span class="fire-countdown-bg" aria-hidden="true"></span>
         <span class="time-label"><i class="${iconClass}" style="color: ${iconColor};"></i> ${label.toUpperCase()}</span>
-        <span id="${uniqueId}Countdown" class="countdown-value">--h --m --s</span>
+        <span id="${uniqueId}Countdown" class="countdown-value"><span class="cd-h">--</span>h <span class="cd-m">--</span>m <span class="cd-s">--</span>s</span>
         <span class="time-secondary">${atText}</span>
     `;
 
@@ -3146,9 +3986,18 @@ function formatDateTimeToTimeOnly(time) {
   const hours = date.getHours();
   const minutes = String(date.getMinutes()).padStart(2, "0");
   const seconds = String(date.getSeconds()).padStart(2, "0");
+  if (currentTimeFormatPreference === "24h") {
+    return `${String(hours).padStart(2, "0")}:${minutes}:${seconds}`;
+  }
   const ampm = hours >= 12 ? "PM" : "AM";
   const h = hours % 12 || 12;
   return `${String(h).padStart(2, "0")}:${minutes}:${seconds} ${ampm}`;
+}
+
+function setCountdownFireState(countdownElement, isActive) {
+  const card = countdownElement?.closest?.(".time-item");
+  if (!card) return;
+  card.classList.toggle("is-fire-window", Boolean(isActive));
 }
 
 // Global countdown updater - runs every second
@@ -3165,7 +4014,7 @@ if (!window.countdownInterval) {
 function updateCountdown(type, targetTime) {
   const currentTime = Date.now();
   const timeDiff = targetTime - currentTime;
-  const preAlertTime = targetTime - PRE_ALERT_MINUTES * 60 * 1000;
+  const preAlertTime = targetTime - getPreAlertMinutes() * 60 * 1000;
   const nativeRuntime = isNativeAppRuntime();
 
   const countdownElement = document.getElementById(`${type}Countdown`);
@@ -3174,7 +4023,7 @@ function updateCountdown(type, targetTime) {
     return; // Element doesn't exist, skip update
   }
 
-  const preAlertKey = `${type}_${targetTime}_pre${PRE_ALERT_MINUTES}`;
+  const preAlertKey = `${type}_${targetTime}_pre${getPreAlertMinutes()}`;
   const mainAlertKey = `${type}_${targetTime}_main`;
   const eventLabel = window.countdownLabels?.[type] || type;
 
@@ -3193,20 +4042,52 @@ function updateCountdown(type, targetTime) {
         if (isForeground) {
           const reminderCopy = getReminderNotificationCopy(
             eventLabel,
-            PRE_ALERT_MINUTES
+            getPreAlertMinutes()
           );
-          window.AgnihotraNotifications?.show(
+      window.AgnihotraNotifications?.show(
             reminderCopy.title,
             reminderCopy.body,
-            preAlertKey
-          );
+        preAlertKey
+      );
           window.AgnihotraBell?.playTriple?.("pre-alert-web");
+          captureDiagnosticMessage("pre-alert-web-fired", "info", {
+            tag: preAlertKey,
+            eventLabel,
+            reminderMinutes: getPreAlertMinutes(),
+          });
+          reportBellDecision("pre-alert-web-rang", {
+            tag: preAlertKey,
+            eventLabel,
+            runtime: "web",
+            reminderMinutes: getPreAlertMinutes(),
+            preAlertDelta,
+          });
           console.log("[AGNIHOTRA][ALERT] pre-alert-web", {
             tag: preAlertKey,
             mode: "native-audio-3x",
           });
+        } else {
+          reportBellDecision("pre-alert-web-skipped-background", {
+            tag: preAlertKey,
+            eventLabel,
+            runtime: "web",
+            reason: "document-not-visible",
+            preAlertDelta,
+          }, "warning");
         }
       } else {
+        captureDiagnosticMessage("pre-alert-native-window-hit", "info", {
+          tag: preAlertKey,
+          eventLabel,
+          reminderMinutes: getPreAlertMinutes(),
+        });
+        reportBellDecision("pre-alert-native-expected-os-notification", {
+          tag: preAlertKey,
+          eventLabel,
+          runtime: "native",
+          reason: "bell-comes-from-notification-channel",
+          preAlertDelta,
+        });
         console.log("[AGNIHOTRA][ALERT] pre-alert-native", {
           tag: preAlertKey,
           mode: "scheduled-notification-channel-sound-only",
@@ -3214,6 +4095,13 @@ function updateCountdown(type, targetTime) {
       }
       window.playedAlerts.add(preAlertKey);
     } else if (preAlertDelta > ALERT_WINDOW_MS) {
+      reportBellDecision("pre-alert-window-missed", {
+        tag: preAlertKey,
+        eventLabel,
+        preAlertDelta,
+        alertWindowMs: ALERT_WINDOW_MS,
+        reason: "app-checked-after-window",
+      }, "warning");
       window.playedAlerts.add(preAlertKey);
     }
   }
@@ -3221,6 +4109,16 @@ function updateCountdown(type, targetTime) {
   if (!window.playedAlerts.has(mainAlertKey)) {
     const mainAlertDelta = currentTime - targetTime;
     if (mainAlertDelta >= 0 && mainAlertDelta <= ALERT_WINDOW_MS) {
+      if (nativeRuntime && !ENABLE_NATIVE_ZERO_WINDOW_TING) {
+        reportBellDecision("zero-window-native-ting-disabled", {
+          tag: mainAlertKey,
+          runtime: "native",
+          reason: "only-pre-alert-enabled",
+          mainAlertDelta,
+        });
+        window.playedAlerts.add(mainAlertKey);
+        return;
+      }
       // Single bell "ting" the moment the agnihotra window opens.
       // Foreground-only: never raise an OS notification here, never play
       // when the app is closed/backgrounded.
@@ -3229,12 +4127,32 @@ function updateCountdown(type, targetTime) {
         document.visibilityState === "visible";
       if (isForeground) {
         ringSingleBellInstant("window-open");
+        captureDiagnosticMessage("window-open-ting", "info", {
+          tag: mainAlertKey,
+          runtime: nativeRuntime ? "native-foreground" : "web-foreground",
+        });
+        reportBellDecision("zero-window-ting-fired", {
+          tag: mainAlertKey,
+          runtime: nativeRuntime ? "native-foreground" : "web-foreground",
+          mainAlertDelta,
+          alertWindowMs: ALERT_WINDOW_MS,
+        });
         console.log("[AGNIHOTRA][ALERT] window-open-ting", {
           tag: mainAlertKey,
           runtime: nativeRuntime ? "native-foreground" : "web-foreground",
           mode: "single-bell-ting",
         });
       } else {
+        captureDiagnosticBreadcrumb("alert", "window-open-skip", {
+          tag: mainAlertKey,
+          reason: "app-not-foreground",
+        });
+        reportBellDecision("zero-window-ting-skipped", {
+          tag: mainAlertKey,
+          runtime: nativeRuntime ? "native-background" : "web-background",
+          reason: "app-not-foreground",
+          mainAlertDelta,
+        }, "warning");
         console.log("[AGNIHOTRA][ALERT] window-open-skip", {
           tag: mainAlertKey,
           reason: "app-not-foreground",
@@ -3242,11 +4160,21 @@ function updateCountdown(type, targetTime) {
       }
       window.playedAlerts.add(mainAlertKey);
     } else if (mainAlertDelta > ALERT_WINDOW_MS) {
+      reportBellDecision("zero-window-missed", {
+        tag: mainAlertKey,
+        runtime: nativeRuntime ? "native" : "web",
+        mainAlertDelta,
+        alertWindowMs: ALERT_WINDOW_MS,
+        reason: "app-checked-after-window",
+      }, "warning");
       window.playedAlerts.add(mainAlertKey);
     }
   }
 
+  const JUST_PASSED_GRACE_MS = 15000; // show "Agnihotra moment complete" for 15s, in sync with the 15s fire animation
+
   if (timeDiff > 0) {
+    setCountdownFireState(countdownElement, false);
     const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
     const hours = Math.floor(
       (timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
@@ -3254,33 +4182,33 @@ function updateCountdown(type, targetTime) {
     const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
 
-    const withDaysTemplate = t(
-      "countdown.format.withDays",
-      "{{days}}d {{hours}}h {{minutes}}m {{seconds}}s"
-    );
-    const noDaysTemplate = t(
-      "countdown.format.noDays",
-      "{{hours}}h {{minutes}}m {{seconds}}s"
-    );
-    let countdownText = "";
-    if (days > 0) {
-      countdownText = interpolateTemplate(withDaysTemplate, {
-        days,
-        hours,
-        minutes,
-        seconds,
-      });
+    // Update individual fixed-width spans to avoid layout shifts
+    const hSpan = countdownElement.querySelector(".cd-h");
+    const mSpan = countdownElement.querySelector(".cd-m");
+    const sSpan = countdownElement.querySelector(".cd-s");
+    if (hSpan && mSpan && sSpan) {
+      const hVal = days > 0 ? `${days}d ${String(hours).padStart(2,"0")}` : String(hours).padStart(2,"0");
+      hSpan.textContent = hVal;
+      mSpan.textContent = String(minutes).padStart(2,"0");
+      sSpan.textContent = String(seconds).padStart(2,"0");
     } else {
-      countdownText = interpolateTemplate(noDaysTemplate, {
-        hours,
-        minutes,
-        seconds,
-      });
+      // Fallback if spans aren't present (older renders)
+      countdownElement.textContent = days > 0
+        ? `${days}d ${String(hours).padStart(2,"0")}h ${String(minutes).padStart(2,"0")}m ${String(seconds).padStart(2,"0")}s`
+        : `${String(hours).padStart(2,"0")}h ${String(minutes).padStart(2,"0")}m ${String(seconds).padStart(2,"0")}s`;
     }
-
-    countdownElement.innerText = countdownText;
+  } else if (timeDiff > -JUST_PASSED_GRACE_MS) {
+    const refreshKey = `${type}:${targetTime}`;
+    if (!String(type).includes("mockwindow") && !window.refreshedUpcomingTimeOnlyTargets.has(refreshKey)) {
+      window.refreshedUpcomingTimeOnlyTargets.add(refreshKey);
+      refreshUpcomingTimeOnlyCardsFromCache("main-countdown-zero");
+    }
+    // Show a polished completion state for 15 seconds after the event
+    setCountdownFireState(countdownElement, true);
+    countdownElement.innerHTML = `<span class="cd-passed">${t("countdown.justPassed", "Agnihotra moment complete")}</span>`;
   } else {
-    // Never show "Time passed". Immediately rotate to the next upcoming slots.
+    setCountdownFireState(countdownElement, false);
+    // 7-second grace expired — rotate to the next upcoming slots
     requestUpcomingEventsRefresh("event-window-passed");
   }
 }
@@ -3297,24 +4225,129 @@ function formatDateTime(time) {
   return formattedDate;
 }
 
+function escapeLocationHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function uniqueLocationParts(parts) {
+  const seen = new Set();
+  return parts
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .filter((part) => {
+      const key = part.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function renderLocationCard({ label = "", primary = "", secondary = "" } = {}) {
+  const userLocationNode = document.getElementById("userLocation");
+  if (!userLocationNode) return;
+  const detailParts = String(secondary || "")
+    .split(" • ")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  userLocationNode.innerHTML = `
+    <span class="location-card-label">${escapeLocationHtml(label)}</span>
+    <span class="location-card-primary">${escapeLocationHtml(primary)}</span>
+    ${
+      detailParts.length
+        ? `<span class="location-card-details">${escapeLocationHtml(detailParts.join(" • "))}</span>`
+        : ""
+    }
+  `;
+}
+
+function buildDetailedAddress(data, latitude, longitude) {
+  const addr = data?.address || {};
+  const namedPlace = data?.namedetails?.name || data?.name || "";
+  const buildingLine = uniqueLocationParts([
+    namedPlace,
+    addr.building,
+    addr.apartments,
+    addr.residential,
+    addr.amenity,
+    addr.shop,
+    addr.office,
+    addr.tourism,
+    addr.leisure,
+  ])[0] || "";
+  const roadLine = uniqueLocationParts([
+    addr.house_number && addr.road ? `${addr.house_number} ${addr.road}` : "",
+    !addr.house_number ? addr.road : "",
+    addr.pedestrian,
+    addr.footway,
+    addr.path,
+  ])[0] || "";
+  const locality = addr.neighbourhood || addr.suburb || addr.quarter || addr.city_block || addr.hamlet || "";
+  const city = addr.city || addr.town || addr.village || addr.municipality || "";
+  const district = addr.city_district || addr.state_district || addr.county || "";
+  const state = addr.state || "";
+  const postcode = addr.postcode ? `PIN ${addr.postcode}` : "";
+  const country = addr.country || "";
+  const coordinates = `${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)}`;
+
+  const primaryParts = uniqueLocationParts([buildingLine, locality, city, district, state]);
+  const primary = primaryParts.slice(0, 3).join(", ") || uniqueLocationParts([city, district, state]).join(", ");
+  const detail = uniqueLocationParts([
+    buildingLine,
+    roadLine,
+    addr.residential,
+    addr.neighbourhood,
+    addr.suburb,
+    addr.quarter,
+    addr.city_block,
+    addr.hamlet,
+    locality,
+    city,
+    addr.municipality,
+    district,
+    state,
+    postcode,
+    country,
+    coordinates,
+  ]).join(" • ");
+
+  return {
+    primary: primary || "GPS location detected",
+    detail,
+  };
+}
+
 async function getLocation() {
-  setLocationLoading(true);
   const startedAt = performance.now();
   debugLog("location:start");
   locationLog("request-start");
 
-  // Immediate bootstrap for reload reliability: show last known location/timings first.
+  // ── STEP 1: Show cached data IMMEDIATELY — no spinner if we have a cached location ──
   const lastKnown = getLastKnownLocation();
-  if (lastKnown) {
-    const fastLocationText =
-      lastKnown.locationName || "Detecting nearby place...";
-    document.getElementById("userLocation").innerText = `Your Location: ${fastLocationText}`;
-    debugLog("location:last-known-bootstrap", {
-      lat: lastKnown.lat,
-      lng: lastKnown.lng,
-      hasName: Boolean(lastKnown.locationName),
-    });
-    getSunriseSunset(lastKnown.lat, lastKnown.lng, lastKnown.locationName || null);
+  if (lastKnown?.lat && lastKnown?.lng) {
+    const cachedName = lastKnown.locationName || null;
+    const cachedDetail = lastKnown.locationDetail || null;
+    if (cachedName) {
+      renderLocationCard({
+        label: "Detected Address:",
+        primary: cachedName,
+        secondary: cachedDetail,
+      });
+    } else {
+      document.getElementById("userLocation").innerText = "Detecting nearby place...";
+    }
+    // Hide spinner immediately — GPS verify runs silently in background
+    setLocationLoading(false);
+    debugLog("location:cache-bootstrap", { lat: lastKnown.lat, lng: lastKnown.lng, cachedName });
+    locationLog("cache-bootstrap", { lat: lastKnown.lat, lng: lastKnown.lng, hasName: Boolean(cachedName) });
+    getSunriseSunset(lastKnown.lat, lastKnown.lng, cachedName);
+  } else {
+    // No cache at all — show spinner so user knows we're working
+    setLocationLoading(true);
   }
 
   if (navigator.geolocation) {
@@ -3333,11 +4366,37 @@ async function getLocation() {
           elapsedMs: Math.round(performance.now() - startedAt)
         });
 
-        document.getElementById("userLocation").innerText =
-          "Your Location: Detecting nearby place...";
-        saveLastKnownLocation(latitude, longitude);
-        // Prioritize timing visibility first; resolve readable address in parallel.
-        const timingsPromise = getSunriseSunset(latitude, longitude);
+        // ── STEP 2: 3 km distance check vs cached position ─────────────────
+        // If user has barely moved, keep showing the cached name and timings (no re-geocode).
+        // Only spend network + time on a full refresh when they have meaningfully moved.
+        const distFromCache = lastKnown?.lat
+          ? haversineDistanceKm(latitude, longitude, lastKnown.lat, lastKnown.lng)
+          : Infinity;
+        const locationChanged = distFromCache > LOCATION_NAME_REFRESH_DISTANCE_KM;
+
+        debugLog("location:distance-check", {
+          distKm: Number(distFromCache.toFixed(3)),
+          locationChanged,
+          threshold: LOCATION_NAME_REFRESH_DISTANCE_KM
+        });
+        locationLog("distance-check", {
+          distKm: Number(distFromCache.toFixed(3)),
+          locationChanged
+        });
+
+        if (!locationChanged && lastKnown?.locationName) {
+          // Still at same place — just silently update coords in storage,
+          // keep showing the cached name and timings (already on screen from Step 1).
+          saveLastKnownLocation(latitude, longitude, lastKnown.locationName, lastKnown.locationDetail || null);
+          setLocationLoading(false);
+          debugLog("location:same-place-cache-kept", { distKm: distFromCache.toFixed(3) });
+          return;
+        }
+
+        // ── STEP 3: Location changed > 3 km — full refresh ────────────────
+        saveLastKnownLocation(latitude, longitude, null);
+        // Recalculate timings with new coords while geocoding runs in parallel
+        const timingsPromise = getSunriseSunset(latitude, longitude, null);
         await reverseGeocode(latitude, longitude, true);
         await timingsPromise;
       },
@@ -3353,15 +4412,11 @@ async function getLocation() {
           elapsedMs: Math.round(performance.now() - startedAt)
         });
 
-        // For timeout/unavailable GPS, attempt one immediate precise retry
-        // before moving to city-level IP fallback.
+        // GPS timed out or unavailable — attempt one precise retry before IP fallback
         if (error?.code !== 1) {
           const recovered = await tryImmediatePreciseLocationRecovery();
           if (recovered) {
-            document.getElementById("userLocation").innerText =
-              "Your Location: Detecting nearby place...";
             saveLastKnownLocation(recovered.latitude, recovered.longitude);
-
             const timingsPromise = getSunriseSunset(recovered.latitude, recovered.longitude);
             await reverseGeocode(recovered.latitude, recovered.longitude, true);
             await timingsPromise;
@@ -3378,13 +4433,20 @@ async function getLocation() {
           return;
         }
 
+        // If we already showed cached data in Step 1, GPS error is silent — no IP fallback needed
+        if (lastKnown?.lat) {
+          setLocationLoading(false);
+          debugLog("location:gps-error-cache-kept", { code: error?.code });
+          return;
+        }
+
         locationLog("gps-fallback-started", { reason: `gps-error-${error?.code || "unknown"}` });
         await getApproximateLocation();
       },
       {
-        enableHighAccuracy: false,
-        timeout: 20000,
-        maximumAge: 300000
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 60000   // Accept a GPS fix up to 1 min old — fast on Android
       }
     );
   } else {
@@ -3405,234 +4467,55 @@ async function getLocation() {
 }
 
 async function reverseGeocode(latitude, longitude, skipTimingFetch = false) {
+  const toCoordinateFallback = () => "GPS location detected";
   const startedAt = performance.now();
   debugLog("reverse-geocode:start", { skipTimingFetch });
+
+  // ── Nominatim reverse geocoding (OpenStreetMap) ───────────────────────────
+  // On any failure (network error, 4xx, 5xx, timeout) fall back to plain coordinates.
+  let resolvedName = null;
+  let resolvedDetail = null;
   try {
-    // Reuse cached place name if location drift is below threshold.
-    const cachedLocationName = getNearbyCachedLocationName(latitude, longitude);
-    if (cachedLocationName) {
-      document.getElementById("userLocation").innerHTML = `
-        <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Detected Address:</span>
-        <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">${cachedLocationName}</span>
-      `;
-      saveLastKnownLocation(latitude, longitude, cachedLocationName);
-      if (!skipTimingFetch) {
-        await getSunriseSunset(latitude, longitude, cachedLocationName);
-      }
-      setLocationLoading(false);
-      locationLog("source-location-name-cache", {
-        elapsedMs: Math.round(performance.now() - startedAt),
-        thresholdKm: LOCATION_NAME_REFRESH_DISTANCE_KM,
-      });
-      return;
-    }
-
-    // If offline, skip API calls and use cached data
-    if (!navigator.onLine) {
-      // Try to get cached location name
-      const cache = getValidCachedData(latitude, longitude);
-      const locationDisplay = cache && cache.locationName ? cache.locationName : "";
-      document.getElementById("userLocation").innerHTML = locationDisplay
-        ? `
-        <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Offline Mode:</span>
-        <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">${locationDisplay}</span>
-      `
-        : `
-        <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Offline Mode:</span>
-        <span style="font-weight: 600; font-size: 1rem; line-height: 1.4; display: block;">Place name unavailable offline. Connect once to fetch nearby city/state.</span>
-      `;
-      if (!skipTimingFetch) {
-        await getSunriseSunset(latitude, longitude);
-      }
-      setLocationLoading(false);
-      debugLog("reverse-geocode:offline-cache", {
-        elapsedMs: Math.round(performance.now() - startedAt)
-      });
-      locationLog("source-offline-cache", { lat: latitude, lng: longitude });
-      return;
-    }
-
-    // Use Nominatim (OpenStreetMap) for more precise address details
-    const response = await fetchWithTimeout(
+    if (navigator.onLine) {
+      const resp = await fetchWithTimeout(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`,
-      {
-        headers: {
-          "Accept-Language": "en",
-        },
-      },
-      7000
-    );
-
-    if (response.ok) {
-      const data = await response.json();
-
-      // Extract a clean, precise address
-      const address = data.display_name;
-      const shortAddress = address.split(",").slice(0, 4).join(",").trim(); // Get first few parts for cleaner display
-
-      document.getElementById("userLocation").innerHTML = `
-                <span style="font-size: 0.9rem; opacity: 0.8; display: block; margin-bottom: 5px;">Detected Address:</span>
-                <span style="font-weight: bold; font-size: 1.1rem; line-height: 1.4; display: block;">${address}</span>
-            `;
-      saveLastKnownLocation(latitude, longitude, address);
-
-      // Call the async getSunriseSunset function and pass location name
-      if (!skipTimingFetch) {
-        await getSunriseSunset(latitude, longitude, address);
-      }
-      debugLog("reverse-geocode:nominatim-success", {
-        elapsedMs: Math.round(performance.now() - startedAt)
-      });
-      locationLog("source-gps+nominatim", {
-        elapsedMs: Math.round(performance.now() - startedAt)
-      });
-    } else {
-      // Fallback to original BigDataCloud service if Nominatim fails
-      const bdcResponse = await fetchWithTimeout(
-        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+        { headers: { "Accept-Language": "en", "Accept": "application/json" } },
+        9000
       );
-      if (bdcResponse.ok) {
-        const bdcData = await bdcResponse.json();
-        const location = `${
-          bdcData.city || bdcData.locality || "Unknown City"
-        }, ${bdcData.principalSubdivision || "Unknown State"}, ${
-          bdcData.countryName || "Unknown Country"
-        }`;
-        document.getElementById(
-          "userLocation"
-        ).innerText = `Your Location: ${location}`;
-        saveLastKnownLocation(latitude, longitude, location);
-        if (!skipTimingFetch) {
-          await getSunriseSunset(latitude, longitude, location);
+      if (resp.ok) {
+        const data = await resp.json();
+        const detailedAddress = buildDetailedAddress(data, latitude, longitude);
+        resolvedName = detailedAddress.primary;
+        resolvedDetail = detailedAddress.detail;
+        if (resolvedName) {
+          locationLog("source-gps+nominatim", { elapsedMs: Math.round(performance.now() - startedAt) });
         }
-        debugLog("reverse-geocode:bdc-success", {
-          elapsedMs: Math.round(performance.now() - startedAt)
-        });
-        locationLog("source-gps+bigdatacloud", {
-          elapsedMs: Math.round(performance.now() - startedAt)
-        });
-      } else {
-        throw new Error("All geocoding services failed");
       }
     }
-  } catch (error) {
-    // Fall back to generic location label (no coordinates in UI)
-    document.getElementById("userLocation").innerText =
-      "Your Location: Place name unavailable";
-    if (!skipTimingFetch) {
-      await getSunriseSunset(latitude, longitude);
-    }
-    debugLog("reverse-geocode:fallback-coordinates", {
-      elapsedMs: Math.round(performance.now() - startedAt),
-      error: error?.message || String(error)
-    });
-    locationLog("source-gps-coordinates-fallback", {
-      error: error?.message || String(error)
-    });
+  } catch (_) {}
+
+  if (resolvedName) {
+    renderLocationCard({ label: "Detected Address:", primary: resolvedName, secondary: resolvedDetail });
+    saveLastKnownLocation(latitude, longitude, resolvedName, resolvedDetail);
+    if (!skipTimingFetch) await getSunriseSunset(latitude, longitude, resolvedName);
+    debugLog("reverse-geocode:success", { name: resolvedName, elapsedMs: Math.round(performance.now() - startedAt) });
+      } else {
+    // Nominatim absent / error — show plain coordinates, timings still work
+    const coordDetail = `${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)}`;
+    const coords = toCoordinateFallback();
+    renderLocationCard({ label: "Your Location:", primary: coords, secondary: coordDetail });
+    saveLastKnownLocation(latitude, longitude, coords, coordDetail);
+    if (!skipTimingFetch) await getSunriseSunset(latitude, longitude, coords);
+    debugLog("reverse-geocode:coord-fallback", { elapsedMs: Math.round(performance.now() - startedAt) });
+    locationLog("source-gps-coordinates-fallback", {});
   }
 
   setLocationLoading(false);
 }
 
 async function reverseGeocodeApproximate(latitude, longitude, skipTimingFetch = false) {
-  const startedAt = performance.now();
-  debugLog("reverse-geocode-approx:start", { skipTimingFetch });
-  try {
-    const cachedLocationName = getNearbyCachedLocationName(latitude, longitude);
-    if (cachedLocationName) {
-      document.getElementById("userLocation").innerText = `Your Location: ${cachedLocationName}`;
-      saveLastKnownLocation(latitude, longitude, cachedLocationName);
-      if (!skipTimingFetch) {
-        await getSunriseSunset(latitude, longitude, cachedLocationName);
-      }
-      setLocationLoading(false);
-      locationLog("source-ip-location-name-cache", {
-        elapsedMs: Math.round(performance.now() - startedAt),
-        thresholdKm: LOCATION_NAME_REFRESH_DISTANCE_KM,
-      });
-      return;
-    }
-
-    // If offline, skip API call
-    if (!navigator.onLine) {
-      const cache = getValidCachedData(latitude, longitude);
-      const locationDisplay = cache && cache.locationName ? `${cache.locationName}` : "";
-      document.getElementById("userLocation").innerText = locationDisplay
-        ? `Offline Mode: ${locationDisplay}`
-        : "Offline Mode: Place name unavailable. Connect once to fetch nearby city/state.";
-      if (!skipTimingFetch) {
-        await getSunriseSunset(latitude, longitude);
-      }
-      setLocationLoading(false);
-      debugLog("reverse-geocode-approx:offline-cache", {
-        elapsedMs: Math.round(performance.now() - startedAt)
-      });
-      locationLog("source-ip-offline-cache", {
-        lat: latitude,
-        lng: longitude
-      });
-      return;
-    }
-
-    // Use the same reverse geocoding service but mark as approximate
-    const response = await fetchWithTimeout(
-      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
-    );
-
-    if (response.ok) {
-      const data = await response.json();
-      const location = `${data.city || data.locality || "Unknown City"}, ${
-        data.principalSubdivision || "Unknown State"
-      }, ${data.countryName || "Unknown Country"}`;
-
-      document.getElementById(
-        "userLocation"
-      ).innerText = `Your Location: ${location}`;
-      saveLastKnownLocation(latitude, longitude, location);
-
-      // Call the async getSunriseSunset function with approximate coordinates and location name
-      if (!skipTimingFetch) {
-        await getSunriseSunset(latitude, longitude, location);
-      }
-      debugLog("reverse-geocode-approx:bdc-success", {
-        elapsedMs: Math.round(performance.now() - startedAt)
-      });
-      locationLog("source-ip+bigdatacloud", {
-        elapsedMs: Math.round(performance.now() - startedAt)
-      });
-    } else {
-      // Fall back to generic location label (no coordinates in UI)
-      document.getElementById("userLocation").innerText =
-        "Your Location: Place name unavailable";
-      saveLastKnownLocation(latitude, longitude);
-      if (!skipTimingFetch) {
-        await getSunriseSunset(latitude, longitude);
-      }
-      debugLog("reverse-geocode-approx:coordinates-only", {
-        elapsedMs: Math.round(performance.now() - startedAt)
-      });
-      locationLog("source-ip-coordinates-only", {
-        elapsedMs: Math.round(performance.now() - startedAt)
-      });
-    }
-  } catch (error) {
-    // Fall back to generic location label (no coordinates in UI)
-    document.getElementById("userLocation").innerText =
-      "Your Location: Place name unavailable";
-    saveLastKnownLocation(latitude, longitude);
-    if (!skipTimingFetch) {
-      await getSunriseSunset(latitude, longitude);
-    }
-    debugLog("reverse-geocode-approx:fallback-coordinates", {
-      elapsedMs: Math.round(performance.now() - startedAt),
-      error: error?.message || String(error)
-    });
-    locationLog("source-ip-fallback-error", {
-      error: error?.message || String(error)
-    });
-  }
-
-  setLocationLoading(false);
+  // IP-based path: reuse Nominatim for the name lookup, same rules as GPS path.
+  await reverseGeocode(latitude, longitude, skipTimingFetch);
 }
 
 async function getApproximateLocation() {
@@ -3763,10 +4646,42 @@ window.onload = () => {
     document.body.setAttribute("translate", "no");
     document.body.classList.add("notranslate");
   }
+  initSentryDiagnostics();
+  setupSupportLogCapture();
+  emitSupportSnapshot("app-onload", {
+    testReminderEnabled: isTestReminderEnabled(),
+    debugOverlayEnabled: getRuntimeBoolean(
+      window.AGNI_RUNTIME_CONFIG?.enableDebugOverlay,
+      window.AGNI_ENABLE_DEBUG_OVERLAY
+    ),
+  });
+  // Boot fingerprint: persists in support log so customer reports tell us
+  // when the app session started + which build it was running.
+  console.info(
+    `[AGNIHOTRA][BOOT] app-onload ${serializeForConsole({
+      release: String(window.AGNI_RUNTIME_CONFIG?.appRelease || "dev"),
+      environment: String(window.AGNI_RUNTIME_CONFIG?.appEnvironment || "production"),
+      runtime: isNativeAppRuntime() ? "native" : "web",
+      platform: window.Capacitor?.getPlatform?.() || "web",
+      sessionId: getSupportSessionId(),
+      installId: ensureSupportInstallId(),
+      online: navigator.onLine,
+      forceOffline: isForcedOfflineModeEnabled(),
+      testReminderEnabled: isTestReminderEnabled(),
+      language: currentLanguage,
+      timeFormat: currentTimeFormatPreference,
+      timezone: Intl?.DateTimeFormat?.()?.resolvedOptions?.()?.timeZone || null,
+      userAgent: navigator.userAgent,
+    })}`
+  );
   debugLog("app:onload");
   setupForcedOfflineMode();
-  setLocationLoading(true);
+  // Only show location spinner on startup if there's no cached location — otherwise
+  // getLocation() will show cached data instantly and hide the spinner itself.
+  const _startupCache = getLastKnownLocation();
+  if (!_startupCache?.lat) setLocationLoading(true);
   setupLanguageToggle();
+  setupSettingsPanel();
   setupTestReminderButton();
   setupScreenWakeLock();
   setupDebugOverlayLogger();
@@ -3776,7 +4691,7 @@ window.onload = () => {
       continueAppInitialization();
       return;
     }
-    updateOnlineStatus();
+  updateOnlineStatus();
   });
 };
 
@@ -3809,251 +4724,20 @@ if ("serviceWorker" in navigator) {
 window.addEventListener('online', updateOnlineStatus);
 window.addEventListener('offline', updateOnlineStatus);
 
-// Format time in MM:SS
-function formatTime(seconds) {
-  if (isNaN(seconds)) return '0:00';
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
+const appAudioControls = window.AgnihotraAudioControls?.create?.() || null;
 
-// Initialize audio player
 function initAudioPlayer(audioId) {
-  const audio = document.getElementById(audioId);
-  const progressBar = document.getElementById(audioId.replace('-audio', '-progress-bar'));
-  const progressFill = document.getElementById(audioId.replace('-audio', '-progress'));
-  const currentTimeDisplay = document.getElementById(audioId.replace('-audio', '-current'));
-  const durationDisplay = document.getElementById(audioId.replace('-audio', '-duration'));
-  
-  if (!audio) return;
-  
-  // Force preload metadata
-  audio.preload = 'metadata';
-  audio.load();
-  
-  // Function to update duration display
-  const updateDuration = () => {
-    if (durationDisplay && audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
-      durationDisplay.textContent = formatTime(audio.duration);
-    }
-  };
-  
-  // Update progress and time
-  audio.addEventListener('timeupdate', () => {
-    if (!isNaN(audio.duration) && isFinite(audio.duration)) {
-      const progress = (audio.currentTime / audio.duration) * 100;
-      if (progressFill) {
-        progressFill.style.width = Math.min(100, progress) + '%';
-      }
-      if (currentTimeDisplay) {
-        currentTimeDisplay.textContent = formatTime(audio.currentTime);
-      }
-      // Update duration if not set yet
-      updateDuration();
-    }
-  });
-  
-  // Load metadata
-  audio.addEventListener('loadedmetadata', () => {
-    updateDuration();
-    if (currentTimeDisplay) {
-      currentTimeDisplay.textContent = '0:00';
-    }
-  });
-  
-  // When audio is ready to play
-  audio.addEventListener('canplay', updateDuration);
-  
-  // Also try on loadeddata
-  audio.addEventListener('loadeddata', updateDuration);
-  
-  // Try immediately if already loaded
-  if (audio.readyState >= 1) {
-    updateDuration();
-  }
-  
-  // Reset on end
-  audio.addEventListener('ended', () => {
-    const button = document.querySelector(`button[onclick*="${audioId}"]`);
-    if (button) {
-      const icon = button.querySelector('i');
-      icon.classList.replace('fa-pause', 'fa-play');
-      button.classList.remove('playing');
-    }
-    if (progressFill) {
-      progressFill.style.width = '0%';
-    }
-    if (currentTimeDisplay) {
-      currentTimeDisplay.textContent = '0:00';
-    }
-  });
-  
-  // Seek functionality - click
-  if (progressBar) {
-    let isDragging = false;
-    let animationFrameId = null;
-    
-    const handleSeek = (event) => {
-      const rect = progressBar.getBoundingClientRect();
-      const clickX = event.clientX - rect.left;
-      const percentage = Math.max(0, Math.min(1, clickX / rect.width));
-      
-      if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
-        // Update progress fill immediately for visual feedback during drag
-        if (isDragging && progressFill) {
-          progressFill.style.width = (percentage * 100) + '%';
-        }
-        
-        // Update audio current time
-        audio.currentTime = percentage * audio.duration;
-      }
-    };
-    
-    progressBar.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      handleSeek(event);
-    });
-    
-    // Seek functionality - drag with RAF for smoothness
-    const startDrag = (e) => {
-      e.preventDefault();
-      isDragging = true;
-      progressBar.classList.add('dragging');
-      handleSeek(e);
-    };
-    
-    const moveDrag = (e) => {
-      if (isDragging) {
-        // Cancel previous animation frame if any
-        if (animationFrameId) {
-          cancelAnimationFrame(animationFrameId);
-        }
-        
-        // Use requestAnimationFrame for smooth updates
-        animationFrameId = requestAnimationFrame(() => {
-          handleSeek(e);
-        });
-      }
-    };
-    
-    const endDrag = () => {
-      if (isDragging) {
-        isDragging = false;
-        progressBar.classList.remove('dragging');
-        if (animationFrameId) {
-          cancelAnimationFrame(animationFrameId);
-          animationFrameId = null;
-        }
-      }
-    };
-    
-    progressBar.addEventListener('mousedown', startDrag);
-    document.addEventListener('mousemove', moveDrag);
-    document.addEventListener('mouseup', endDrag);
-    
-    // Touch support for mobile
-    progressBar.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      isDragging = true;
-      progressBar.classList.add('dragging');
-      const touch = e.touches[0];
-      handleSeek(touch);
-    });
-    
-    document.addEventListener('touchmove', (e) => {
-      if (isDragging) {
-        e.preventDefault();
-        
-        // Cancel previous animation frame if any
-        if (animationFrameId) {
-          cancelAnimationFrame(animationFrameId);
-        }
-        
-        // Use requestAnimationFrame for smooth updates
-        const touch = e.touches[0];
-        animationFrameId = requestAnimationFrame(() => {
-          handleSeek(touch);
-        });
-      }
-    }, { passive: false });
-    
-    document.addEventListener('touchend', endDrag);
-  }
+  appAudioControls?.initAudioPlayer?.(audioId);
 }
 
-// Custom Audio Player Controls
 function toggleAudio(audioId, button) {
-  const audio = document.getElementById(audioId);
-  const icon = button.querySelector('i');
-  
-  if (audio.paused) {
-    // Pause any other playing audio
-    document.querySelectorAll('.mantra-audio').forEach(a => {
-      if (a.id !== audioId && !a.paused) {
-        a.pause();
-        const otherBtn = document.querySelector(`button[onclick*="${a.id}"]`);
-        if (otherBtn) {
-          otherBtn.querySelector('i').classList.replace('fa-pause', 'fa-play');
-          otherBtn.classList.remove('playing');
-        }
-      }
-    });
-    
-    audio.play();
-    icon.classList.replace('fa-play', 'fa-pause');
-    button.classList.add('playing');
-  } else {
-    audio.pause();
-    icon.classList.replace('fa-pause', 'fa-play');
-    button.classList.remove('playing');
-  }
+  appAudioControls?.toggleAudio?.(audioId, button);
 }
 
-function pauseAllAppAudio() {
-  document.querySelectorAll('.mantra-audio').forEach((audio) => {
-    if (!audio.paused) {
-      audio.pause();
-    }
-  });
-
-  document.querySelectorAll('.play-btn').forEach((button) => {
-    const icon = button.querySelector('i');
-    if (icon && icon.classList.contains('fa-pause')) {
-      icon.classList.replace('fa-pause', 'fa-play');
-    }
-    button.classList.remove('playing');
-  });
-
-  activeBellPlayers.forEach((player) => {
-    try {
-      player.pause();
-      player.currentTime = 0;
-    } catch (_) {}
-  });
-  activeBellPlayers.clear();
-}
+window.toggleAudio = toggleAudio;
 
 function setupNativeAppAudioLifecycle() {
-  const capacitor = window.Capacitor;
-  if (!capacitor?.isNativePlatform || !capacitor.isNativePlatform()) return;
-
-  const appPlugin = capacitor?.Plugins?.App;
-  if (!appPlugin?.addListener) return;
-
-  appPlugin.addListener('appStateChange', ({ isActive }) => {
-    if (!isActive) pauseAllAppAudio();
-  });
-
-  appPlugin.addListener('pause', () => {
-    pauseAllAppAudio();
-  });
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') {
-      pauseAllAppAudio();
-    }
-  });
+  appAudioControls?.setupNativeAppAudioLifecycle?.();
 }
 
 function setupMobileMenuToggle() {

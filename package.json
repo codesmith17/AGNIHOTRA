@@ -4,6 +4,7 @@
   "description": "EternalAgni Agnihotra timing app with precise sunrise/sunset times",
   "main": "index.html",
   "scripts": {
+    "postinstall": "patch-package",
     "build": "node build.js",
     "start": "node cors-proxy.js",
     "dev": "nodemon cors-proxy.js",
@@ -25,13 +26,17 @@
     "@capacitor/core": "^8.3.4",
     "@capacitor/filesystem": "^8.1.2",
     "@capacitor/local-notifications": "^8.2.0",
+    "@capacitor/share": "^8.0.1",
+    "capacitor-email-composer": "^8.0.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
-    "http-proxy-middleware": "^2.0.6"
+    "http-proxy-middleware": "^2.0.6",
+    "jspdf": "^4.2.1"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.0.1",
+    "patch-package": "^8.0.1"
   },
   "keywords": [
     "agnihotra",

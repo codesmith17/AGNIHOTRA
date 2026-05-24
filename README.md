@@ -267,6 +267,14 @@ These are read during `npm run build` / `npm run android:sync`:
   Controls in-app debug overlay visibility. Defaults to the same value as `AGNI_ENABLE_TEST_REMINDER` when not set.
 - `AGNI_FORCE_OFFLINE=true|false`  
   Forces app-level offline mode by blocking web network calls (`fetch`/`XHR`/`WebSocket`) even when phone internet is ON.
+- `AGNI_ENABLE_REMOTE_LOG_CAPTURE=true|false`  
+  Master switch for remote diagnostics capture. Keep `false` for normal client builds, `true` for support/debug builds.
+- `AGNI_SENTRY_DSN=<dsn>`  
+  Enables Sentry client diagnostics for customer issue capture (bell/notification/location/export events).
+- `AGNI_APP_RELEASE=<version+hash>`  
+  Release tag shown in Sentry events (example: `1.0.1+7a2fde9`).
+- `AGNI_APP_ENV=production|staging|debug`  
+  Sentry environment tag for filtering dashboards.
 
 Quick debug build command (enable both test reminder + debug overlay):
 
@@ -279,6 +287,22 @@ Offline simulation build command:
 ```bash
 AGNI_FORCE_OFFLINE=true npm run android:apk
 ```
+
+Sentry-enabled debug build command:
+
+```bash
+AGNI_ENABLE_REMOTE_LOG_CAPTURE=true AGNI_SENTRY_DSN="https://<publicKey>@o<org>.ingest.sentry.io/<projectId>" AGNI_APP_RELEASE="1.0.1+local" AGNI_APP_ENV=debug npm run android:apk
+```
+
+### Remote Logging Limits / Gaps
+
+- Each support snapshot includes Android version (best effort from Device plugin or user-agent), app release/env, install/session IDs, permission states, online/offline state, and latest location metadata.
+- Manual snapshot trigger is available from app JS console: `window.captureAgnihotraSupportSnapshot("manual-check")`.
+- If internet is unavailable, diagnostics are queued and sent later when network returns (some events may be delayed).
+- If the app is force-killed immediately after an event, the last few logs may not upload.
+- DSN missing or `AGNI_ENABLE_REMOTE_LOG_CAPTURE=false` means no remote logs are captured.
+- Browser/OS permission dialogs can be restricted by device policy; you may only receive final `denied` state.
+- Free Sentry plans have monthly event quotas and retention limits; old events can be dropped after quota/retention is reached.
 
 ## How It Works
 
