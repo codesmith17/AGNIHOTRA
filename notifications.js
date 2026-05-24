@@ -7,6 +7,12 @@
 
   async function requestPermission(options = {}) {
     const { force = false } = options;
+    window.AgnihotraDiagnostics?.captureBreadcrumb?.(
+      "permission",
+      "notification-request-start",
+      { force },
+      "info"
+    );
 
     if (permissionRequestInFlight) {
       return permissionRequestInFlight;
@@ -25,6 +31,20 @@
           granted = await web.requestWebPermission();
         }
         shared.notificationPermissionRequested = true;
+        if (!granted) {
+          window.AgnihotraDiagnostics?.captureMessage?.(
+            "permission-notification-not-granted",
+            "warning",
+            { force }
+          );
+        } else {
+          window.AgnihotraDiagnostics?.captureBreadcrumb?.(
+            "permission",
+            "notification-granted",
+            { force },
+            "info"
+          );
+        }
         return Boolean(granted);
       } finally {
         permissionRequestInFlight = null;
@@ -65,9 +85,21 @@
         const localNotifications = shared.getCapacitorLocalNotifications();
         if (!localNotifications) return "unavailable";
         const current = await localNotifications.checkPermissions();
+        window.AgnihotraDiagnostics?.captureBreadcrumb?.(
+          "permission",
+          "notification-status-native",
+          { status: current?.display || "unknown" },
+          "debug"
+        );
         return current?.display || "unknown";
       }
       if (!("Notification" in window)) return "unavailable";
+      window.AgnihotraDiagnostics?.captureBreadcrumb?.(
+        "permission",
+        "notification-status-web",
+        { status: Notification.permission || "default" },
+        "debug"
+      );
       return Notification.permission || "default";
     } catch (_) {
       return "unknown";
@@ -82,6 +114,9 @@
   }
 
   function setup() {
+    if (shared.isCapacitorNativeRuntime()) {
+      native.setupNativeNotificationObservers?.();
+    }
     ensurePermissionBootstrap();
   }
 
@@ -100,7 +135,7 @@
     return true;
   }
 
-  async function scheduleUpcomingReminders(events, options = 10) {
+  async function scheduleUpcomingReminders(events, options = 15) {
     if (!shared.isCapacitorNativeRuntime()) return;
     return native.scheduleUpcomingReminders(events, options);
   }

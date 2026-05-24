@@ -1,6 +1,48 @@
 (() => {
   const shared = window.AgnihotraNotificationShared;
-  const REMINDER_CATCHUP_DELAY_MS = 3000;
+  const REMINDER_LEAD_STORAGE_KEY = "agnihotra_reminder_lead_v1";
+  const REMINDER_VIBRATE_STORAGE_KEY = "agnihotra_reminder_vibrate_v1";
+  const WATCH_ALERT_STORAGE_KEY = "agnihotra_watch_alert_v1";
+  const DEFAULT_LEAD_MINUTES = 15;
+  const STRICT_SCHEDULE_GRACE_MS = 1500;
+
+  function getReminderLeadMinutes() {
+    try {
+      const saved = localStorage.getItem(REMINDER_LEAD_STORAGE_KEY);
+      if (saved === null) return DEFAULT_LEAD_MINUTES;
+      const val = parseInt(saved, 10);
+      if (isNaN(val)) return DEFAULT_LEAD_MINUTES;
+      // Clamp to 2-60 mins as per requirements.
+      return Math.max(2, Math.min(60, val));
+    } catch (_) {
+      return DEFAULT_LEAD_MINUTES;
+    }
+  }
+
+  let observersBound = false;
+  const seenPostedNotificationIds = new Set();
+
+  function getBooleanSetting(key, defaultValue) {
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved === null) return defaultValue;
+      return saved === "true";
+    } catch (_) {
+      return defaultValue;
+    }
+  }
+
+  function isReminderVibrationEnabled() {
+    return getBooleanSetting(REMINDER_VIBRATE_STORAGE_KEY, true);
+  }
+
+  function isWatchAlertEnabled() {
+    return getBooleanSetting(WATCH_ALERT_STORAGE_KEY, false);
+  }
+
+  function getReminderChannelId() {
+    return `${shared.CAPACITOR_CHANNEL_ID}-${isReminderVibrationEnabled() ? "vibrate" : "silent"}`;
+  }
 
   // Serialize schedule/cancel operations so concurrent callers can't create
   // duplicate notifications (cache-hit path + fast path + background 3-month).
@@ -21,40 +63,142 @@
       serialized = String(meta);
     }
     console.log(`[AGNIHOTRA][NOTIFY] ${message} ${serialized}`);
+    try {
+      window.AgnihotraDiagnostics?.captureBreadcrumb?.(
+        "notify",
+        message,
+        meta || {},
+        "info"
+      );
+    } catch (_) {}
+  }
+
+  function emitOsDeliveryDiagnostics(eventName, payload = {}, level = "info") {
+    try {
+      window.AgnihotraDiagnostics?.captureMessage?.(eventName, level, payload);
+    } catch (_) {}
+    try {
+      window.AgnihotraDiagnostics?.captureBreadcrumb?.(
+        "notify-os",
+        eventName,
+        payload || {},
+        level
+      );
+    } catch (_) {}
+  }
+
+  function normalizeNotificationPayload(notification = {}) {
+    const extra = notification?.extra || {};
+    return {
+      notificationId: Number(notification?.id || 0) || null,
+      title: notification?.title || null,
+      channelId: notification?.channelId || null,
+      tag: extra?.tag || null,
+      eventId: extra?.eventId || null,
+      eventTime: Number(extra?.eventTime || 0) || null,
+      catchUp: Boolean(extra?.catchUp),
+      wearNudge: Boolean(extra?.wearNudge),
+      source: "localNotificationReceived",
+    };
+  }
+
+  function setupNativeNotificationObservers() {
+    if (observersBound) return;
+    const localNotifications = shared.getCapacitorLocalNotifications();
+    if (!shared.isCapacitorNativeRuntime() || !localNotifications?.addListener) return;
+    observersBound = true;
+
+    localNotifications.addListener("localNotificationReceived", (event) => {
+      const notification = event?.notification || {};
+      const payload = normalizeNotificationPayload(notification);
+      const dedupeKey = String(payload.notificationId || "") + "::" + String(payload.tag || "");
+      if (seenPostedNotificationIds.has(dedupeKey)) return;
+      seenPostedNotificationIds.add(dedupeKey);
+      if (seenPostedNotificationIds.size > 200) {
+        seenPostedNotificationIds.clear();
+        seenPostedNotificationIds.add(dedupeKey);
+      }
+
+      logNotify("notification-posted-by-os", payload);
+      emitOsDeliveryDiagnostics("notification-posted-by-os", payload, "info");
+      emitOsDeliveryDiagnostics(
+        "sound-attempted",
+        {
+          ...payload,
+          expectedSound: shared.CAPACITOR_NOTIFICATION_SOUND,
+          expectedChannelId: getReminderChannelId(),
+          expectedVibration: isReminderVibrationEnabled(),
+          expectedWatchAlert: isWatchAlertEnabled(),
+          note: "OS handles actual playback policy and may suppress during call/DND.",
+        },
+        "info"
+      );
+      try {
+        window.AgnihotraInstrumentation?.recordReminderFired?.(payload);
+      } catch (_) {}
+    });
+
+    localNotifications.addListener("localNotificationActionPerformed", (event) => {
+      const notification = event?.notification || {};
+      const payload = normalizeNotificationPayload(notification);
+      payload.source = "localNotificationActionPerformed";
+      payload.actionId = event?.actionId || null;
+      logNotify("notification-action-performed", payload);
+      emitOsDeliveryDiagnostics("notification-action-performed", payload, "info");
+    });
   }
 
   async function ensureCapacitorChannel() {
     const localNotifications = shared.getCapacitorLocalNotifications();
     if (!localNotifications) return;
+    const reminderChannelId = getReminderChannelId();
+    const vibrationEnabled = isReminderVibrationEnabled();
+    const watchAlertEnabled = isWatchAlertEnabled();
     try {
-      logNotify("channel-create-start", {
-        channelId: shared.CAPACITOR_CHANNEL_ID,
-        sound: shared.CAPACITOR_NOTIFICATION_SOUND,
-      });
+      // Delete old channels to ensure clean state and single notification behavior
+      try {
+        const channels = await localNotifications.listChannels();
+        for (const ch of channels.channels || []) {
+          if (
+            ch.id.includes("agnihotra") &&
+            ch.id !== reminderChannelId &&
+            ch.id !== shared.CAPACITOR_WEAR_CHANNEL_ID
+          ) {
+            await localNotifications.deleteChannel({ id: ch.id });
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to cleanup old channels:", e);
+      }
+
+      console.log(`[AGNIHOTRA] ensureCapacitorChannel: creating channel ${reminderChannelId} with sound ${shared.CAPACITOR_NOTIFICATION_SOUND}`);
       await localNotifications.createChannel({
-        id: shared.CAPACITOR_CHANNEL_ID,
+        id: reminderChannelId,
         name: "Agnihotra Reminders",
         description: "Sunrise and sunset reminders",
         importance: 5,
         visibility: 1,
         sound: shared.CAPACITOR_NOTIFICATION_SOUND,
-        vibration: true,
+        vibration: vibrationEnabled,
       });
-      // Secondary channel intended for watch-friendly tiny nudge (silent + vibration).
-      await localNotifications.createChannel({
-        id: shared.CAPACITOR_WEAR_CHANNEL_ID,
-        name: "Agnihotra Watch Nudge",
-        description: "Tiny vibration reminder for paired watch",
-        importance: 2,
-        visibility: 1,
-        vibration: true,
-      });
-      logNotify("channel-create-done", {
-        channelId: shared.CAPACITOR_CHANNEL_ID,
-        wearChannelId: shared.CAPACITOR_WEAR_CHANNEL_ID,
-      });
+      if (watchAlertEnabled) {
+        await localNotifications.createChannel({
+          id: shared.CAPACITOR_WEAR_CHANNEL_ID,
+          name: "Smart watch alerts",
+          description: "Short companion alerts for connected smart watches",
+          importance: 4,
+          visibility: 1,
+          vibration: true,
+        });
+      }
+      console.log(`[AGNIHOTRA] ensureCapacitorChannel: channel created successfully`);
     } catch (error) {
       console.warn("Capacitor channel setup skipped:", error);
+      window.AgnihotraDiagnostics?.captureException?.(
+        error,
+        "notify-channel-setup",
+        { channelId: reminderChannelId, vibrationEnabled, watchAlertEnabled }
+      );
     }
   }
 
@@ -65,33 +209,28 @@
     try {
       const current = await localNotifications.checkPermissions();
       logNotify("permission-check", { ...(current || {}), forcePrompt });
-      if (current.display === "granted") return true;
-      if (current.display === "denied" && !forcePrompt) return false;
+      if (current.display === "granted") {
+        window.AgnihotraInstrumentation?.recordPermissionResult?.("notifications", "granted");
+        return true;
+      }
+      if (current.display === "denied" && !forcePrompt) {
+        window.AgnihotraInstrumentation?.recordPermissionResult?.("notifications", "denied-no-prompt");
+        return false;
+      }
       const requested = await localNotifications.requestPermissions();
       logNotify("permission-request-result", requested || {});
+      window.AgnihotraInstrumentation?.recordPermissionResult?.(
+        "notifications",
+        requested?.display === "granted" ? "granted" : "denied",
+        requested || {}
+      );
       return requested.display === "granted";
     } catch (error) {
       console.warn("Capacitor notification permission failed:", error);
-      return false;
-    }
-  }
-
-  async function ensureExactAlarmSupport(localNotifications) {
-    if (!localNotifications) return;
-    if (
-      typeof localNotifications.checkExactNotificationSetting !== "function" ||
-      typeof localNotifications.changeExactNotificationSetting !== "function"
-    ) {
-      return;
-    }
-
-    try {
-      const exact = await localNotifications.checkExactNotificationSetting();
-      const exactValue = exact?.value || exact?.exact_alarm;
-      return exactValue === "granted";
-    } catch (error) {
-      // Not fatal: some Android versions/devices don't expose this flow.
-      console.warn("Exact alarm setting check skipped:", error);
+      window.AgnihotraDiagnostics?.captureException?.(
+        error,
+        "notify-permission-request"
+      );
       return false;
     }
   }
@@ -102,14 +241,16 @@
     const granted = await requestCapacitorPermission();
     if (!granted) return;
     await ensureCapacitorChannel();
+    const reminderChannelId = getReminderChannelId();
 
     shared.showInAppAlertToast(title, body);
 
     try {
       logNotify("show-immediate-native", {
         tag,
-        channelId: shared.CAPACITOR_CHANNEL_ID,
+        channelId: reminderChannelId,
         sound: shared.CAPACITOR_NOTIFICATION_SOUND,
+        vibration: isReminderVibrationEnabled(),
       });
       await localNotifications.schedule({
         notifications: [
@@ -121,7 +262,7 @@
               at: new Date(Date.now() + 100),
               allowWhileIdle: true,
             },
-            channelId: shared.CAPACITOR_CHANNEL_ID,
+            channelId: reminderChannelId,
             group: shared.CAPACITOR_NOTIFICATION_GROUP,
             sound: shared.CAPACITOR_NOTIFICATION_SOUND,
             smallIcon: "ic_stat_notify",
@@ -132,10 +273,15 @@
       });
     } catch (error) {
       console.warn("Capacitor immediate notification failed:", error);
+      window.AgnihotraDiagnostics?.captureException?.(
+        error,
+        "notify-immediate-schedule",
+        { tag }
+      );
     }
   }
 
-  async function scheduleUpcomingReminders(events, options = 10) {
+  async function scheduleUpcomingReminders(events, options = 15) {
     return runExclusively(async () => {
       const localNotifications = shared.getCapacitorLocalNotifications();
       if (!shared.isCapacitorNativeRuntime() || !localNotifications) return;
@@ -143,39 +289,15 @@
       const granted = await requestCapacitorPermission();
       if (!granted || !Array.isArray(events) || events.length === 0) return;
       await ensureCapacitorChannel();
+      const currentLeadMinutes = getReminderLeadMinutes();
+      const reminderChannelId = getReminderChannelId();
+      const vibrationEnabled = isReminderVibrationEnabled();
+      const includeWearNudge = isWatchAlertEnabled();
 
       const now = Date.now();
-      const leadMinutes =
-        typeof options === "number"
-          ? options
-          : Number(options?.leadMinutes || 10);
       const replaceExisting =
         typeof options === "object" ? options?.replaceExisting !== false : true;
-      const includeWearNudge =
-        typeof options === "object" ? options?.includeWearNudge !== false : true;
-      const reminderLeadMs = leadMinutes * 60 * 1000;
-
-      if (replaceExisting) {
-        try {
-          const pending = await localNotifications.getPending();
-          const reminderIds = (pending.notifications || [])
-            .filter((n) => {
-              const tagStr = String(n?.extra?.tag || "");
-              return (
-                n?.group === shared.CAPACITOR_NOTIFICATION_GROUP ||
-                tagStr.includes("native-reminder") ||
-                tagStr.includes("agnihotra")
-              );
-            })
-            .map((n) => ({ id: n.id }));
-          if (reminderIds.length > 0) {
-            logNotify("cancel-previous-native", { count: reminderIds.length });
-            await localNotifications.cancel({ notifications: reminderIds });
-          }
-        } catch (error) {
-          console.warn("Unable to clear previous native reminders:", error);
-        }
-      }
+      const reminderLeadMs = currentLeadMinutes * 60 * 1000;
 
       const seenIds = new Set();
       const notifications = events
@@ -185,14 +307,10 @@
           const eventTime = Number(event.time);
           if (!Number.isFinite(eventTime)) return [];
 
-          const missedReminderButEventUpcoming =
-            reminderAt <= now + 5000 && eventTime > now + 15000;
-          if (reminderAt <= now + 5000 && !missedReminderButEventUpcoming) return [];
-
-          const firstFireAt = missedReminderButEventUpcoming
-            ? now + REMINDER_CATCHUP_DELAY_MS
-            : reminderAt;
-          const tag = `native-reminder-${event.id}-${event.time}-pre${leadMinutes}`;
+          // Strict mode: never catch-up late. If exact lead-minute slot is gone,
+          // skip scheduling this reminder instead of firing delayed.
+          if (reminderAt <= now + STRICT_SCHEDULE_GRACE_MS) return [];
+          const tag = `native-reminder-${event.id}-${event.time}-pre${currentLeadMinutes}`;
           const id = shared.toCapacitorNotificationId(tag);
           if (seenIds.has(id)) return [];
           seenIds.add(id);
@@ -201,12 +319,12 @@
             title: event.reminderTitle || "Agnihotra reminder",
             body:
               event.reminderBody ||
-              `${event.label} starts in ${leadMinutes} minutes.`,
+              `${event.label} starts in ${currentLeadMinutes} minutes.`,
             schedule: {
-              at: new Date(firstFireAt),
+              at: new Date(reminderAt),
               allowWhileIdle: true,
             },
-            channelId: shared.CAPACITOR_CHANNEL_ID,
+            channelId: reminderChannelId,
             group: shared.CAPACITOR_NOTIFICATION_GROUP,
             sound: shared.CAPACITOR_NOTIFICATION_SOUND,
             smallIcon: "ic_stat_notify",
@@ -215,54 +333,114 @@
               tag,
               eventId: event.id,
               eventTime,
-              catchUp: missedReminderButEventUpcoming,
+              catchUp: false,
+              strictLeadMinutes: currentLeadMinutes,
+              vibrationEnabled,
             },
           };
           if (!includeWearNudge) return [primary];
 
-          const wearTag = `${tag}-wear`;
-          const wearId = shared.toCapacitorNotificationId(wearTag);
-          if (seenIds.has(wearId)) return [primary];
-          seenIds.add(wearId);
-          const wear = {
-            id: wearId,
-            title: event.reminderTitle || "Agnihotra reminder",
-            body:
-              event.reminderBody ||
-              `${event.label} starts in ${leadMinutes} minutes.`,
+          const wearTag = `wear-${tag}`;
+          const wearNudge = {
+            id: shared.toCapacitorNotificationId(wearTag),
+            title: "Agnihotra",
+            body: event.reminderBody || `${event.label} in ${currentLeadMinutes} minutes.`,
             schedule: {
-              at: new Date(firstFireAt),
+              at: new Date(reminderAt),
               allowWhileIdle: true,
             },
             channelId: shared.CAPACITOR_WEAR_CHANNEL_ID,
             group: shared.CAPACITOR_NOTIFICATION_GROUP,
-            // Keep watch nudge silent; vibration is controlled by channel.
             smallIcon: "ic_stat_notify",
             iconColor: "#E07B26",
             extra: {
               tag: wearTag,
               eventId: event.id,
               eventTime,
-              catchUp: missedReminderButEventUpcoming,
+              catchUp: false,
               wearNudge: true,
+              strictLeadMinutes: currentLeadMinutes,
             },
           };
-          return [primary, wear];
+          return [primary, wearNudge];
         })
         .filter(Boolean);
 
       if (notifications.length === 0) return;
 
+      if (replaceExisting) {
+        try {
+          const pending = await localNotifications.getPending();
+          const pendingReminderNotifications = (pending.notifications || []).filter((n) => {
+            const tagStr = String(n?.extra?.tag || "");
+            return (
+              n?.group === shared.CAPACITOR_NOTIFICATION_GROUP ||
+              tagStr.includes("native-reminder") ||
+              tagStr.includes("agnihotra")
+            );
+          });
+          const pendingIds = pendingReminderNotifications.map((n) => ({ id: n.id }));
+          const pendingIdSet = new Set(pendingReminderNotifications.map((n) => Number(n.id)));
+          const nextIdSet = new Set(notifications.map((n) => Number(n.id)));
+          const scheduleIsIdentical =
+            pendingIdSet.size === nextIdSet.size &&
+            [...nextIdSet].every((id) => pendingIdSet.has(id));
+
+          if (scheduleIsIdentical) {
+            logNotify("schedule-upcoming-native-skipped-identical", {
+              count: notifications.length,
+              leadMinutes: currentLeadMinutes,
+            });
+            return;
+          }
+
+          if (pendingIds.length > 0) {
+            logNotify("cancel-previous-native", { count: pendingIds.length });
+            window.AgnihotraInstrumentation?.recordReminderCancelled?.({
+              count: pendingIds.length,
+              source: "schedule-upcoming-replace",
+            });
+            await localNotifications.cancel({ notifications: pendingIds });
+          }
+        } catch (error) {
+          console.warn("Unable to clear previous native reminders:", error);
+          window.AgnihotraDiagnostics?.captureException?.(
+            error,
+            "notify-cancel-previous"
+          );
+        }
+      }
+
       try {
         logNotify("schedule-upcoming-native", {
           count: notifications.length,
-          channelId: shared.CAPACITOR_CHANNEL_ID,
+          channelId: reminderChannelId,
           sound: shared.CAPACITOR_NOTIFICATION_SOUND,
+          vibration: vibrationEnabled,
+          leadMinutes: currentLeadMinutes,
+          includeWearNudge,
           firstTag: notifications[0]?.extra?.tag || null,
         });
         await localNotifications.schedule({ notifications });
+        window.AgnihotraInstrumentation?.recordReminderScheduled?.({
+          count: notifications.length,
+          channelId: reminderChannelId,
+          leadMinutes: currentLeadMinutes,
+          source: "schedule-upcoming-native",
+          firstAt: notifications[0]?.schedule?.at
+            ? new Date(notifications[0].schedule.at).toISOString()
+            : null,
+          lastAt: notifications[notifications.length - 1]?.schedule?.at
+            ? new Date(notifications[notifications.length - 1].schedule.at).toISOString()
+            : null,
+        });
       } catch (error) {
         console.warn("Failed to schedule native reminders:", error);
+        window.AgnihotraDiagnostics?.captureException?.(
+          error,
+          "notify-schedule-upcoming",
+          { notifications: notifications.length }
+        );
       }
     });
   }
@@ -273,6 +451,7 @@
     body = "Reminder check",
     tag = "agnihotra-test-reminder",
   } = {}) {
+    console.log(`[AGNIHOTRA] scheduleTestReminder native called: delay=${delaySeconds} title=${title}`);
     const safeDelaySeconds = Math.max(1, Number(delaySeconds) || 30);
     const scheduleAt = new Date(Date.now() + safeDelaySeconds * 1000);
 
@@ -282,32 +461,65 @@
     const granted = await requestCapacitorPermission();
     if (!granted) return false;
     await ensureCapacitorChannel();
+    const reminderChannelId = getReminderChannelId();
+    const vibrationEnabled = isReminderVibrationEnabled();
+    const includeWearNudge = isWatchAlertEnabled();
 
     try {
+      console.log(`[AGNIHOTRA] scheduleTestReminder native: scheduling at ${scheduleAt.toISOString()} on channel ${reminderChannelId} with sound ${shared.CAPACITOR_NOTIFICATION_SOUND}`);
       const notification = {
         id: shared.toCapacitorNotificationId(`${tag}-${Date.now()}`),
         title,
         body,
         schedule: { at: scheduleAt, allowWhileIdle: true },
-        channelId: shared.CAPACITOR_CHANNEL_ID,
+        channelId: reminderChannelId,
         group: shared.CAPACITOR_NOTIFICATION_GROUP,
         sound: shared.CAPACITOR_NOTIFICATION_SOUND,
         smallIcon: "ic_stat_notify",
         iconColor: "#E07B26",
-        extra: { tag },
+        extra: { tag, vibrationEnabled },
       };
+      const notifications = [notification];
+      if (includeWearNudge) {
+        notifications.push({
+          id: shared.toCapacitorNotificationId(`wear-${tag}-${Date.now()}`),
+          title: "Agnihotra",
+          body: body || "Reminder check",
+          schedule: { at: scheduleAt, allowWhileIdle: true },
+          channelId: shared.CAPACITOR_WEAR_CHANNEL_ID,
+          group: shared.CAPACITOR_NOTIFICATION_GROUP,
+          smallIcon: "ic_stat_notify",
+          iconColor: "#E07B26",
+          extra: { tag: `wear-${tag}`, wearNudge: true },
+        });
+      }
+      console.log(`[AGNIHOTRA] scheduleTestReminder native: notification object: ${JSON.stringify(notification)}`);
       logNotify("schedule-test-native", {
         tag,
         scheduleAt: scheduleAt.toISOString(),
-        channelId: shared.CAPACITOR_CHANNEL_ID,
+        channelId: reminderChannelId,
         sound: shared.CAPACITOR_NOTIFICATION_SOUND,
+        vibration: vibrationEnabled,
+        includeWearNudge,
       });
       await localNotifications.schedule({
-        notifications: [notification],
+        notifications,
+      });
+      window.AgnihotraInstrumentation?.recordReminderScheduled?.({
+        count: notifications.length,
+        channelId: reminderChannelId,
+        source: "schedule-test-native",
+        tag,
+        firstAt: scheduleAt.toISOString(),
+        lastAt: scheduleAt.toISOString(),
       });
       return true;
     } catch (error) {
       console.warn("Failed to schedule native test reminder:", error);
+      window.AgnihotraDiagnostics?.captureException?.(
+        error,
+        "notify-schedule-test"
+      );
       return false;
     }
   }
@@ -315,9 +527,9 @@
   window.AgnihotraNotificationNative = {
     ensureCapacitorChannel,
     requestCapacitorPermission,
-    ensureExactAlarmSupport,
     showNativeNotification,
     scheduleUpcomingReminders,
     scheduleTestReminder,
+    setupNativeNotificationObservers,
   };
 })();

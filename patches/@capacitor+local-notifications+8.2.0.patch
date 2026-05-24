@@ -1,0 +1,129 @@
+diff --git a/node_modules/@capacitor/local-notifications/android/src/main/java/com/capacitorjs/plugins/localnotifications/LocalNotificationManager.java b/node_modules/@capacitor/local-notifications/android/src/main/java/com/capacitorjs/plugins/localnotifications/LocalNotificationManager.java
+index 0b826a5..446aba6 100644
+--- a/node_modules/@capacitor/local-notifications/android/src/main/java/com/capacitorjs/plugins/localnotifications/LocalNotificationManager.java
++++ b/node_modules/@capacitor/local-notifications/android/src/main/java/com/capacitorjs/plugins/localnotifications/LocalNotificationManager.java
+@@ -173,6 +173,10 @@ public class LocalNotificationManager {
+             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+             .setGroupSummary(localNotification.isGroupSummary());
+ 
++        if (channelId != null && channelId.startsWith("agnihotra-export-headsup")) {
++            mBuilder.setPriority(NotificationCompat.PRIORITY_MAX).setCategory(NotificationCompat.CATEGORY_STATUS);
++        }
++
+         if (localNotification.getLargeBody() != null) {
+             // support multiline text
+             mBuilder.setStyle(
+@@ -212,7 +216,11 @@ public class LocalNotificationManager {
+         }
+ 
+         mBuilder.setVisibility(NotificationCompat.VISIBILITY_PRIVATE);
+-        mBuilder.setOnlyAlertOnce(true);
++        // Export notifications should re-alert (heads-up) every time they are
++        // reposted for the same notification id, so the user always gets the
++        // popup. All other notifications keep the original alert-once behaviour.
++        boolean alertOnce = channelId == null || !channelId.startsWith("agnihotra-export-headsup");
++        mBuilder.setOnlyAlertOnce(alertOnce);
+ 
+         mBuilder.setSmallIcon(localNotification.getSmallIcon(context, getDefaultSmallIcon(context)));
+         mBuilder.setLargeIcon(localNotification.getLargeIcon(context));
+@@ -377,7 +385,26 @@ public class LocalNotificationManager {
+         long trigger,
+         PendingIntent pendingIntent
+     ) {
+-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
++        boolean canUseExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms();
++
++        // AGNIHOTRA PATCH: For allowWhileIdle alarms with exact-alarm permission, use setAlarmClock().
++        // This is the ONLY API that truly bypasses Doze, App Standby buckets, Battery Saver, and OEM
++        // (OPPO/Xiaomi/Vivo) proprietary background restrictions. setExactAndAllowWhileIdle is still
++        // subject to a window length under app_standby/battery_saver policies on ColorOS/MIUI/etc.
++        // setAlarmClock guarantees window=0 + wakeup. Trade-off: a small alarm icon appears in the
++        // status bar for the next upcoming alarm, which is appropriate for a meditation reminder.
++        if (canUseExact && schedule.allowWhileIdle()) {
++            try {
++                PendingIntent showIntent = buildAlarmShowIntent();
++                AlarmManager.AlarmClockInfo info = new AlarmManager.AlarmClockInfo(trigger, showIntent);
++                alarmManager.setAlarmClock(info, pendingIntent);
++                return;
++            } catch (Throwable t) {
++                Logger.warn("Capacitor/LocalNotification", "setAlarmClock failed, falling back: " + t.getMessage());
++            }
++        }
++
++        if (!canUseExact) {
+             Logger.warn(
+                 "Capacitor/LocalNotification",
+                 "Exact alarms not allowed in user settings.  Notification scheduled with non-exact alarm."
+@@ -396,6 +423,20 @@ public class LocalNotificationManager {
+         }
+     }
+ 
++    private PendingIntent buildAlarmShowIntent() {
++        Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
++        if (launchIntent == null) {
++            launchIntent = new Intent();
++            launchIntent.setPackage(context.getPackageName());
++        }
++        launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
++        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
++            flags = flags | PendingIntent.FLAG_IMMUTABLE;
++        }
++        return PendingIntent.getActivity(context, 0, launchIntent, flags);
++    }
++
+     public void cancel(PluginCall call) {
+         List<Integer> notificationsToCancel = LocalNotification.getLocalNotificationPendingList(call);
+         if (notificationsToCancel != null) {
+diff --git a/node_modules/@capacitor/local-notifications/android/src/main/java/com/capacitorjs/plugins/localnotifications/NotificationChannelManager.java b/node_modules/@capacitor/local-notifications/android/src/main/java/com/capacitorjs/plugins/localnotifications/NotificationChannelManager.java
+index b2ea880..dd4fd69 100644
+--- a/node_modules/@capacitor/local-notifications/android/src/main/java/com/capacitorjs/plugins/localnotifications/NotificationChannelManager.java
++++ b/node_modules/@capacitor/local-notifications/android/src/main/java/com/capacitorjs/plugins/localnotifications/NotificationChannelManager.java
+@@ -6,7 +6,9 @@ import android.content.ContentResolver;
+ import android.content.Context;
+ import android.graphics.Color;
+ import android.media.AudioAttributes;
++import android.media.RingtoneManager;
+ import android.net.Uri;
++import android.provider.Settings;
+ import androidx.core.app.NotificationCompat;
+ import com.getcapacitor.JSArray;
+ import com.getcapacitor.JSObject;
+@@ -89,16 +91,36 @@ public class NotificationChannelManager {
+                 }
+             }
+             String sound = channel.getString(CHANNEL_SOUND, null);
++            String channelId = channel.getString(CHANNEL_ID);
++            boolean isAgnihotraExportChannel = channelId != null && channelId.startsWith("agnihotra-export-headsup");
+             if (sound != null && !sound.isEmpty()) {
+                 if (sound.contains(".")) {
+                     sound = sound.substring(0, sound.lastIndexOf('.'));
+                 }
++                // AGNIHOTRA PATCH: Use USAGE_ALARM + FLAG_AUDIBILITY_ENFORCED so the bell routes
++                // through the alarm stream and is less likely to be silenced by DND/silent modes.
++                // Scheduling still uses setAlarmClock() so delivery is exact with no delays.
+                 AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
++                    .setUsage(AudioAttributes.USAGE_ALARM)
++                    .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
+                     .build();
+                 Uri soundUri = Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + context.getPackageName() + "/raw/" + sound);
+                 notificationChannel.setSound(soundUri, audioAttributes);
++            } else if (isAgnihotraExportChannel) {
++                // AGNIHOTRA PATCH: For our export-completion channel, explicitly bind the
++                // system default notification sound. Without this, the channel is created
++                // with no sound URI on some OEMs (notably ColorOS/MIUI), which silences it
++                // and disqualifies it from showing a heads-up banner even at IMPORTANCE_HIGH.
++                Uri defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
++                if (defaultSoundUri == null) {
++                    defaultSoundUri = Settings.System.DEFAULT_NOTIFICATION_URI;
++                }
++                AudioAttributes notificationAttrs = new AudioAttributes.Builder()
++                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
++                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
++                    .build();
++                notificationChannel.setSound(defaultSoundUri, notificationAttrs);
+             }
+             notificationManager.createNotificationChannel(notificationChannel);
+         }

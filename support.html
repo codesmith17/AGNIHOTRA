@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en" translate="no" class="notranslate">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#ff7f32">
+  <title>EternalAgni Help & Support</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/images/app-icon-192.png">
+  <link rel="stylesheet" href="https://icono-49d6.kxcdn.com/icono.min.css">
+  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.8.1/css/all.css">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body translate="no" class="notranslate">
+  <section class="settings-section fade-in">
+    <center>
+      <h2>Help & Support</h2>
+      <p class="section-desc">Create and send a support report to help us debug customer issues faster.</p>
+    </center>
+
+    <section class="support-section-card" aria-labelledby="supportSectionTitle">
+      <div class="support-section-header">
+        <h3 id="supportSectionTitle">Support Actions</h3>
+        <p>Send report with logs and diagnostics. Report data is pruned automatically (30 days retention).</p>
+      </div>
+      <div class="support-section-actions">
+        <button type="button" id="exportSupportLogsBtn" class="settings-action-btn">Share Support Report</button>
+        <button type="button" id="emailSupportBtn" class="settings-action-btn settings-action-btn--ghost">Email Support</button>
+      </div>
+      <p id="supportLogExportStatus" class="settings-status" aria-live="polite"></p>
+    </section>
+
+    <div class="settings-footer-actions">
+      <a href="settings.html" class="btn-primary">Go to Settings</a>
+      <a href="index.html#home" class="btn-primary btn-primary--soft">Back to Home</a>
+    </div>
+  </section>
+
+  <script>
+    window.AGNI_RUNTIME_CONFIG = {
+      appRelease: "__AGNI_APP_RELEASE__",
+      appEnvironment: "__AGNI_APP_ENV__"
+    };
+  </script>
+  <script src="shared/diagnostics/instrumentation.js"></script>
+  <script src="shared/diagnostics/payload-builder.js"></script>
+  <script src="shared/settings/settings-page.js"></script>
+</body>
+</html>

@@ -13,6 +13,10 @@
       return permission === "granted";
     } catch (error) {
       console.warn("Notification permission request failed:", error);
+      window.AgnihotraDiagnostics?.captureException?.(
+        error,
+        "web-notify-permission-request"
+      );
       return false;
     }
   }
@@ -41,12 +45,20 @@
       }
     } catch (error) {
       console.warn("Service worker notification failed:", error);
+      window.AgnihotraDiagnostics?.captureException?.(
+        error,
+        "web-notify-sw-show"
+      );
     }
 
     try {
       new Notification(title, options);
     } catch (error) {
       console.warn("Notification failed:", error);
+      window.AgnihotraDiagnostics?.captureException?.(
+        error,
+        "web-notify-fallback-show"
+      );
     }
   }
 
