@@ -6,31 +6,48 @@
   <meta name="theme-color" content="#ff7f32">
   <title>EternalAgni Settings</title>
   <link rel="icon" type="image/png" sizes="192x192" href="assets/images/app-icon-192.png">
-  <link rel="stylesheet" href="https://icono-49d6.kxcdn.com/icono.min.css">
-  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.8.1/css/all.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous">
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
-<body translate="no" class="notranslate">
+<body translate="no" class="notranslate settings-page-body">
   <section id="settings" class="settings-section fade-in">
-    <center>
-      <h2>App Settings</h2>
-      <p class="section-desc">Customize core app preferences only.</p>
-    </center>
+    <header class="settings-page-header">
+      <a href="index.html#home" class="settings-page-brand">
+        <img src="assets/images/eternalagni-icon.png" alt="" class="settings-page-logo" width="52" height="52">
+        <div class="settings-page-brand-text">
+          <p class="settings-page-eyebrow">EternalAgni</p>
+          <h2>App Settings</h2>
+        </div>
+      </a>
+      <p class="section-desc settings-page-desc">Customize core app preferences only.</p>
+    </header>
+
     <div class="settings-grid">
       <article class="settings-card">
-        <h3>Time format</h3>
-        <p>Choose how sunrise/sunset times are shown in the app.</p>
+        <div class="settings-card-head">
+          <span class="settings-card-icon settings-card-icon--time" aria-hidden="true"><i class="fa-solid fa-clock"></i></span>
+          <div class="settings-card-head-text">
+            <h3>Time format</h3>
+            <p>Choose how sunrise/sunset times are shown in the app.</p>
+          </div>
+        </div>
         <div class="settings-pill-group" id="timeFormatPills" role="group" aria-label="Time format">
-          <button type="button" class="settings-pill" data-time-format="ampm">AM / PM</button>
-          <button type="button" class="settings-pill" data-time-format="24h">24-hour</button>
+          <button type="button" class="settings-pill" data-time-format="ampm"><i class="fa-solid fa-sun" aria-hidden="true"></i> AM / PM</button>
+          <button type="button" class="settings-pill" data-time-format="24h"><i class="fa-solid fa-clock" aria-hidden="true"></i> 24-hour</button>
         </div>
       </article>
 
       <article class="settings-card">
-        <h3>Reminder Timing</h3>
-        <p>How many minutes before sunrise/sunset should the reminder ring?</p>
+        <div class="settings-card-head">
+          <span class="settings-card-icon settings-card-icon--reminder" aria-hidden="true"><i class="fa-solid fa-bell"></i></span>
+          <div class="settings-card-head-text">
+            <h3>Reminder Timing</h3>
+            <p>How many minutes before sunrise/sunset should the reminder ring?</p>
+          </div>
+        </div>
         <div class="settings-input-wrap">
+          <span class="settings-input-icon" aria-hidden="true"><i class="fa-solid fa-hourglass-half"></i></span>
           <input type="number" id="reminderLeadTimeInput" min="2" max="60" value="15" class="settings-number-input">
           <span class="settings-input-unit">minutes</span>
         </div>
@@ -38,27 +55,37 @@
       </article>
 
       <article class="settings-card">
-        <h3>Vibration</h3>
-        <p>Vibrate the phone when the Agnihotra reminder rings.</p>
+        <div class="settings-card-head">
+          <span class="settings-card-icon settings-card-icon--vibrate" aria-hidden="true"><i class="fa-solid fa-mobile-screen-button"></i></span>
+          <div class="settings-card-head-text">
+            <h3>Vibration</h3>
+            <p>Vibrate the phone when the Agnihotra reminder rings.</p>
+          </div>
+        </div>
         <label class="settings-toggle-row">
-          <span>Vibrate on reminder</span>
+          <span class="settings-toggle-label"><i class="fa-solid fa-wave-square" aria-hidden="true"></i> Vibrate on reminder</span>
           <input type="checkbox" id="reminderVibrateToggle" class="settings-toggle-input">
         </label>
       </article>
 
       <article class="settings-card">
-        <h3>Smart watch alert</h3>
-        <p>Send a small companion alert that Android can mirror to a connected smart watch.</p>
+        <div class="settings-card-head">
+          <span class="settings-card-icon settings-card-icon--watch" aria-hidden="true"><i class="fa-solid fa-watch-smart"></i></span>
+          <div class="settings-card-head-text">
+            <h3>Smart watch alert</h3>
+            <p>Send a small companion alert that Android can mirror to a connected smart watch.</p>
+          </div>
+        </div>
         <label class="settings-toggle-row">
-          <span>Watch companion alert</span>
+          <span class="settings-toggle-label"><i class="fa-solid fa-watch-smart" aria-hidden="true"></i> Watch companion alert</span>
           <input type="checkbox" id="watchAlertToggle" class="settings-toggle-input">
         </label>
         <p class="settings-input-hint">Requires watch notifications to be enabled in your watch/phone app.</p>
       </article>
     </div>
     <div class="settings-footer-actions">
-      <a href="support.html" class="btn-primary">Help & Support</a>
-      <a href="index.html#home" class="btn-primary btn-primary--soft">Back to Home</a>
+      <a href="support.html" class="btn-primary"><i class="fa-solid fa-life-ring" aria-hidden="true"></i> Help &amp; Support</a>
+      <a href="index.html#home" class="btn-primary btn-primary--soft"><i class="fa-solid fa-house" aria-hidden="true"></i> Back to Home</a>
     </div>
   </section>
 
@@ -68,6 +95,7 @@
       appEnvironment: "__AGNI_APP_ENV__"
     };
   </script>
+  <script src="shared/app/ota-updater.js"></script>
   <script src="shared/diagnostics/instrumentation.js"></script>
   <script src="shared/diagnostics/payload-builder.js"></script>
   <script src="shared/settings/settings-page.js"></script>

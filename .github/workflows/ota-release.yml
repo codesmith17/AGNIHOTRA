@@ -1,0 +1,71 @@
+name: OTA Release
+
+# Fully automated, free OTA publishing.
+#
+# Trigger options:
+#   * Push a tag like v1.0.2            -> publishes that version
+#   * Run manually (workflow_dispatch)  -> publishes package.json's version
+#
+# It builds the web bundle, zips public/ (index.html at the zip root), writes
+# version.json, and uploads BOTH as assets on a GitHub Release. Because the
+# release is marked "latest", the app's
+# https://github.com/<owner>/<repo>/releases/latest/download/version.json
+# URL immediately resolves to the new bundle. Devices download it in the
+# background and apply it on the next natural app restart.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      min_native:
+        description: "Minimum native APK version required to apply this bundle"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=${V}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${V}" >> "$GITHUB_OUTPUT"
+
+      - name: Build + pack OTA bundle
+        env:
+          AGNI_OTA_MIN_NATIVE: ${{ github.event.inputs.min_native }}
+        run: npm run ota:pack
+
+      - name: Publish GitHub Release (latest)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: OTA ${{ steps.ver.outputs.tag }}
+          body: "Self-hosted OTA web bundle for EternalAgni."
+          make_latest: "true"
+          files: |
+            release/ota/dist.zip
+            release/ota/version.json

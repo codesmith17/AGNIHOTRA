@@ -209,10 +209,9 @@
       });
 
       try {
-        const nativeAudio = window.Capacitor?.Plugins?.NativeAudio;
-        if (nativeAudio?.stop) {
-          nativeAudio.stop({ assetId: "agnihotra-single-bell" }).catch(() => {});
-          nativeAudio.stop({ assetId: "agnihotra-bell-3x" }).catch(() => {});
+        const stopBells = window.AgnihotraBell?.stopAll;
+        if (typeof stopBells === "function") {
+          stopBells().catch(() => {});
         }
       } catch (_) {}
     }

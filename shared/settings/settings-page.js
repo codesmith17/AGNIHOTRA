@@ -151,13 +151,16 @@
       try {
         const path = `EternalAgniSupport/${filename}`;
         const base64 = await blobToBase64(blob);
+        // Use private app storage (DATA) so support reports are wiped when
+        // the user uninstalls the app, just like PDF/ICS exports. Other apps
+        // can still read the file via the FileProvider content:// URI.
         await nativeFs.writeFile({
           path,
           data: base64,
-          directory: "DOCUMENTS",
+          directory: "DATA",
           recursive: true,
         });
-        const uri = await nativeFs.getUri({ path, directory: "DOCUMENTS" });
+        const uri = await nativeFs.getUri({ path, directory: "DATA" });
         if (nativeShare?.share && uri?.uri) {
           const sharePayload = {
             title: "Agnihotra support report",
@@ -280,13 +283,15 @@
       try {
         const path = `EternalAgniSupport/${filename}`;
         const base64 = await blobToBase64(blob);
+        // Match the share flow — keep support reports in private app storage
+        // so they vanish on uninstall.
         await nativeFs.writeFile({
           path,
           data: base64,
-          directory: "DOCUMENTS",
+          directory: "DATA",
           recursive: true,
         });
-        const uri = await nativeFs.getUri({ path, directory: "DOCUMENTS" });
+        const uri = await nativeFs.getUri({ path, directory: "DATA" });
         if (uri?.uri) {
           const sharePayload = {
             title: "Email Agnihotra support report",
@@ -377,14 +382,20 @@
     defaultValue,
     settingName,
     savedMessage,
+    onAfterChange,
   }) {
     const input = document.getElementById(inputId);
     if (!input) return;
     input.checked = getBooleanSetting(storageKey, defaultValue);
-    input.addEventListener("change", () => {
+    input.addEventListener("change", async () => {
       setBooleanSetting(storageKey, input.checked);
       setStatus(savedMessage);
       window.AgnihotraInstrumentation?.recordSettingsChange?.(settingName, input.checked);
+      try {
+        await onAfterChange?.(input.checked);
+      } catch (error) {
+        console.warn(`[AGNIHOTRA][SETTINGS] ${settingName} onAfterChange failed`, error);
+      }
     });
   }
 
@@ -397,6 +408,14 @@
       defaultValue: true,
       settingName: "reminder-vibrate",
       savedMessage: "Vibration setting saved.",
+      onAfterChange: async (enabled) => {
+        console.log(
+          `[AGNIHOTRA][VIBRATE] settings-changed ${JSON.stringify({ enabled })}`
+        );
+        if (window.AgnihotraNotificationNative?.ensureCapacitorChannel) {
+          await window.AgnihotraNotificationNative.ensureCapacitorChannel();
+        }
+      },
     });
     setupToggleSetting({
       inputId: "watchAlertToggle",

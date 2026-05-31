@@ -64,6 +64,12 @@ ADB commands:
   adb-logs-location
       Stream only AGNI location logs.
 
+  adb-logs-vibrate
+      Stream only AGNI vibration / channel logs.
+
+  adb-logs-ota
+      Stream only self-hosted OTA / notifyAppReady logs.
+
   screenshot [file_name]
       Take screenshot from device and save under release/widget-screenshots/.
       Default file_name: screenshot-YYYYmmdd-HHMMSS.png
@@ -175,6 +181,14 @@ cmd_adb_logs_location() {
   adb logcat -v time '*:I' | awk '/AGNIHOTRA\]\[LOCATION/ { print }'
 }
 
+cmd_adb_logs_vibrate() {
+  adb logcat -v time '*:I' | awk '/AGNIHOTRA\]\[VIBRATE/ { print }'
+}
+
+cmd_adb_logs_ota() {
+  adb logcat -v time '*:I' | awk '/AGNIHOTRA\]\[OTA/ { print }'
+}
+
 cmd_screenshot() {
   ensure_release_dir
   local file_name="${1:-}"
@@ -208,6 +222,8 @@ case "$command" in
   adb-home) adb shell input keyevent 3 ;;
   adb-logs) adb logcat -v time '*:I' ;;
   adb-logs-location) cmd_adb_logs_location ;;
+  adb-logs-vibrate) cmd_adb_logs_vibrate ;;
+  adb-logs-ota) cmd_adb_logs_ota ;;
   screenshot) cmd_screenshot "${1:-}" ;;
   *)
     echo "Unknown command: $command" >&2

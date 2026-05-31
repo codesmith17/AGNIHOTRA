@@ -38,6 +38,33 @@
     return plugins.NativeAudio || null;
   }
 
+  function extractPluginErrorMessage(error) {
+    if (!error) return "";
+    if (typeof error === "string") {
+      try {
+        const parsed = JSON.parse(error);
+        if (parsed?.message) return String(parsed.message);
+      } catch (_) {}
+      return error;
+    }
+    if (error?.message) return String(error.message);
+    if (error?.errorMessage) return String(error.errorMessage);
+    try {
+      const serialized = JSON.stringify(error);
+      const parsed = JSON.parse(serialized);
+      if (parsed?.message) return String(parsed.message);
+    } catch (_) {}
+    return String(error);
+  }
+
+  function isAssetAlreadyRegistered(message) {
+    return /already\s+(?:loaded|exists)/i.test(String(message || ""));
+  }
+
+  function isAssetNotLoadedError(message) {
+    return /asset\s+is\s+not\s+loaded/i.test(String(message || ""));
+  }
+
   function logBell(message, meta = {}) {
     let serialized = "";
     try {
@@ -80,10 +107,10 @@
         return true;
       } catch (error) {
         state.lastError = error;
-        const message = error?.message || String(error);
-        if (/already loaded/i.test(message)) {
+        const message = extractPluginErrorMessage(error);
+        if (isAssetAlreadyRegistered(message)) {
           state.preloaded[kind] = true;
-          logBell("preload-already-loaded", { kind });
+          logBell("preload-already-loaded", { kind, message });
           return true;
         }
         logBell("preload-failed", { kind, message });
@@ -146,7 +173,7 @@
         });
         return true;
       } catch (error) {
-        const message = error?.message || String(error);
+        const message = extractPluginErrorMessage(error);
         logBell("play-native-failed", { kind, reason, message });
       }
     }
@@ -176,12 +203,36 @@
     }
   }
 
+  async function stopKind(kind) {
+    if (!state.preloaded[kind]) return;
+    const cfg = ASSETS[kind];
+    const plugin = getPlugin();
+    if (!plugin?.stop) return;
+    try {
+      await plugin.stop({ assetId: cfg.id });
+    } catch (error) {
+      const message = extractPluginErrorMessage(error);
+      if (!isAssetNotLoadedError(message)) {
+        logBell("stop-failed", { kind, message });
+      }
+    }
+  }
+
+  async function stopAll() {
+    await Promise.all([stopKind("single"), stopKind("triple")]);
+  }
+
+  if (isNativeRuntime()) {
+    preloadAll().catch(() => {});
+  }
+
   window.AgnihotraBell = {
     preload: preloadAll,
     preloadSingle: () => preloadKind("single"),
     preloadTriple: () => preloadKind("triple"),
     playInstant: (reason = "single") => playKind("single", reason),
     playTriple: (reason = "triple") => playKind("triple", reason),
+    stopAll,
     isReady: () => state.preloaded.single,
     isTripleReady: () => state.preloaded.triple,
     getLastError: () => state.lastError,

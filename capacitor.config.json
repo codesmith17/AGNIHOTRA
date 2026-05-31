@@ -3,6 +3,11 @@
   "appName": "EternalAgni",
   "webDir": "public",
   "plugins": {
+    "CapacitorUpdater": {
+      "autoUpdate": false,
+      "resetWhenUpdate": true,
+      "directUpdate": false
+    },
     "LocalNotifications": {
       "smallIcon": "ic_stat_notify",
       "iconColor": "#E07B26",
