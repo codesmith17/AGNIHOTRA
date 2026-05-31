@@ -3,11 +3,16 @@ package com.eternalagni.app;
 import android.os.Bundle;
 import android.view.WindowManager;
 
+import androidx.core.splashscreen.SplashScreen;
+
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        SplashScreen splashScreen = SplashScreen.installSplashScreen(this);
+        splashScreen.setKeepOnScreenCondition(() -> false);
+
         registerPlugin(AgnihotraWidgetPlugin.class);
         super.onCreate(savedInstanceState);
         // Keep the device screen awake whenever the app's window is in the

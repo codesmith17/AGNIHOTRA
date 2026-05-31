@@ -4,34 +4,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Platform: native app vs public website — must run before first paint -->
-    <script>
-        (function () {
-            var isNative = false;
-            try {
-                isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-            } catch (e) {}
-            document.documentElement.classList.add(isNative ? 'agni-platform-native' : 'agni-platform-web');
-            window.AgnihotraRuntime = { isNative: isNative, isWeb: !isNative, platform: isNative ? 'native' : 'web' };
-            if (isNative) {
-                document.documentElement.classList.add('agni-splash-active');
-                window.AgnihotraSplashStartedAt = Date.now();
-            }
-        })();
-    </script>
-    <style>
-        html.agni-platform-web #appSplash { display: none !important; visibility: hidden !important; }
-        /* Native: cover the app until splash script dismisses — splash script is at end of body */
-        html.agni-platform-native.agni-splash-active body { overflow: hidden; }
-        html.agni-platform-native.agni-splash-active #appSplash {
-            display: flex !important;
-            visibility: visible !important;
-        }
-        html.agni-platform-native.agni-splash-active body > *:not(#appSplash) {
-            visibility: hidden !important;
-            pointer-events: none !important;
-        }
-    </style>
     <meta name="theme-color" content="#ff7f32">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -56,32 +28,6 @@
 </head>
 
 <body translate="no" class="notranslate">
-    <div id="appSplash" class="app-splash agni-native-only" role="status" aria-label="EternalAgni loading">
-        <div class="app-splash-vignette" aria-hidden="true"></div>
-        <div class="app-splash-aura" aria-hidden="true"></div>
-        <div class="app-splash-embers" aria-hidden="true">
-            <span></span><span></span><span></span><span></span><span></span>
-            <span></span><span></span><span></span><span></span><span></span>
-        </div>
-        <div class="app-splash-stage">
-            <div class="app-splash-logo-ring">
-                <div class="app-splash-flame" aria-hidden="true">
-                    <i class="fa-solid fa-fire"></i>
-                </div>
-                <img class="app-splash-logo" src="assets/images/eternalagni-icon.png" alt="" width="88" height="88">
-            </div>
-            <h1 class="app-splash-title">EternalAgni</h1>
-            <p class="app-splash-tagline">Sacred Agnihotra Timings</p>
-            <div class="app-splash-loader" aria-hidden="true">
-                <span></span><span></span><span></span>
-            </div>
-            <div class="app-splash-version-card" aria-label="App version">
-                <p class="app-splash-version-kicker">Current release</p>
-                <p class="app-splash-version-num" id="appSplashVersion">__AGNI_APP_RELEASE__</p>
-                <p class="app-splash-version-meta" id="appSplashVersionMeta">Preparing…</p>
-            </div>
-        </div>
-    </div>
     <div id="offline-indicator" style="display: none; background: #ff4500; color: white; text-align: center; padding: 5px; font-size: 0.8rem; position: fixed; top: 0; left: 0; right: 0; z-index: 1001;">
         <i class="fas fa-plane-slash"></i> Offline Mode - Using Cached Timings
     </div>
@@ -575,175 +521,18 @@
 
     <script>
         window.AGNI_RUNTIME_CONFIG = {
-            enableTestReminder: "__AGNI_ENABLE_TEST_REMINDER__",
-            enableDebugOverlay: "__AGNI_ENABLE_DEBUG_OVERLAY__",
-            forceOffline: "__AGNI_FORCE_OFFLINE__",
-            testReminderSeconds: "__AGNI_TEST_REMINDER_SECONDS__",
-            enableRemoteLogCapture: "__AGNI_ENABLE_REMOTE_LOG_CAPTURE__",
-            sentryDsn: "__AGNI_SENTRY_DSN__",
-            appRelease: "__AGNI_APP_RELEASE__",
-            appEnvironment: "__AGNI_APP_ENV__"
+            enableTestReminder: "false",
+            enableDebugOverlay: "false",
+            forceOffline: "false",
+            testReminderSeconds: "20",
+            enableRemoteLogCapture: "false",
+            sentryDsn: "",
+            appRelease: "1.0.2",
+            appEnvironment: "production"
         };
     </script>
-    <script>
-        (function () {
-            var splash = document.getElementById("appSplash");
-            if (!splash) return;
-
-            if (!window.AgnihotraRuntime || !window.AgnihotraRuntime.isNative) {
-                splash.remove();
-                return;
-            }
-
-            if (!document.documentElement.classList.contains("agni-splash-active")) {
-                document.documentElement.classList.add("agni-splash-active");
-                window.AgnihotraSplashStartedAt = Date.now();
-            }
-            console.info(
-                "[AGNIHOTRA][SPLASH] show " +
-                JSON.stringify({
-                    release: (window.AGNI_RUNTIME_CONFIG && window.AGNI_RUNTIME_CONFIG.appRelease) || "",
-                    domReady: document.readyState
-                })
-            );
-
-            var versionEl = document.getElementById("appSplashVersion");
-            var metaEl = document.getElementById("appSplashVersionMeta");
-
-            function formatVersionLabel(raw) {
-                var v = String(raw || "").trim().replace(/^v/i, "");
-                if (!v || v === "dev" || v.indexOf("__AGNI") === 0) return "";
-                return "v" + v;
-            }
-
-            function setVersionDisplay(bundleLabel, metaText) {
-                if (versionEl && bundleLabel) {
-                    versionEl.textContent = bundleLabel;
-                }
-                if (metaEl && metaText) {
-                    metaEl.textContent = metaText;
-                }
-            }
-
-            function resolveFromConfig() {
-                var cfg = window.AGNI_RUNTIME_CONFIG || {};
-                var bundle = formatVersionLabel(cfg.appRelease);
-                var env = String(cfg.appEnvironment || "").trim();
-                if (!bundle && versionEl) {
-                    bundle = String(versionEl.textContent || "").trim();
-                    if (bundle.indexOf("__AGNI") >= 0) bundle = "";
-                }
-                if (bundle) {
-                    setVersionDisplay(
-                        bundle,
-                        env && env !== "production" ? env.charAt(0).toUpperCase() + env.slice(1) + " build" : "EternalAgni for Android"
-                    );
-                }
-                return bundle;
-            }
-
-            resolveFromConfig();
-
-            (async function enrichVersionFromNative() {
-                try {
-                    var updater = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorUpdater;
-                    var appPlugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
-                    var bundleLabel = "";
-                    var nativeLabel = "";
-                    var meta = "EternalAgni for Android";
-
-                    if (updater && updater.current) {
-                        var cur = await updater.current();
-                        var bundleVer = cur && cur.bundle && cur.bundle.version;
-                        var bundleId = cur && cur.bundle && cur.bundle.id;
-                        if (bundleVer && bundleVer !== "builtin" && bundleVer !== "0.0.0") {
-                            bundleLabel = formatVersionLabel(bundleVer);
-                            if (bundleId && bundleId !== "builtin") {
-                                meta = "Live bundle · " + bundleId.slice(0, 8);
-                            }
-                        }
-                        if (cur && cur.native) {
-                            nativeLabel = formatVersionLabel(cur.native);
-                        }
-                    }
-
-                    if (appPlugin && appPlugin.getInfo) {
-                        var info = await appPlugin.getInfo();
-                        if (info && info.version) {
-                            nativeLabel = formatVersionLabel(info.version);
-                            if (info.build) {
-                                meta = "Build " + info.build;
-                            }
-                        }
-                    }
-
-                    if (!bundleLabel) {
-                        bundleLabel = resolveFromConfig() || formatVersionLabel("1.0.4");
-                    }
-
-                    if (nativeLabel && bundleLabel && nativeLabel !== bundleLabel) {
-                        meta = "App " + nativeLabel + " · Bundle " + bundleLabel.replace(/^v/, "");
-                    } else if (nativeLabel) {
-                        meta = "App " + nativeLabel;
-                    }
-
-                    setVersionDisplay(bundleLabel, meta);
-                    console.info(
-                        "[AGNIHOTRA][SPLASH] version " +
-                        JSON.stringify({ bundle: bundleLabel, meta: meta, native: nativeLabel })
-                    );
-                } catch (err) {
-                    console.warn("[AGNIHOTRA][SPLASH] enrich-failed", err && err.message ? err.message : err);
-                    resolveFromConfig();
-                }
-            })();
-
-            var MIN_VISIBLE_MS = 2000;
-            var MAX_VISIBLE_MS = 4900;
-            var startedAt = window.AgnihotraSplashStartedAt || Date.now();
-            var dismissed = false;
-
-            function hideSplash() {
-                if (dismissed) return;
-                dismissed = true;
-                var wait = Math.max(0, MIN_VISIBLE_MS - (Date.now() - startedAt));
-                console.info(
-                    "[AGNIHOTRA][SPLASH] hide-scheduled " +
-                    JSON.stringify({ waitMs: wait, visibleMs: Date.now() - startedAt })
-                );
-                setTimeout(function () {
-                    document.documentElement.classList.remove("agni-splash-active");
-                    document.documentElement.classList.add("agni-splash-done");
-                    splash.classList.add("is-hidden");
-                    setTimeout(function () {
-                        if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
-                    }, 700);
-                }, wait);
-            }
-
-            function scheduleHideSplash() {
-                if (document.readyState === "complete") {
-                    hideSplash();
-                } else {
-                    window.addEventListener("load", hideSplash, { once: true });
-                }
-            }
-
-            scheduleHideSplash();
-            setTimeout(hideSplash, MAX_VISIBLE_MS);
-            window.AgnihotraHideSplash = hideSplash;
-        })();
-    </script>
     <script src="https://browser.sentry-cdn.com/8.51.0/bundle.tracing.min.js" crossorigin="anonymous"></script>
-    <script>
-        (function () {
-            if (!window.AgnihotraRuntime || !window.AgnihotraRuntime.isNative) return;
-            var s = document.createElement("script");
-            s.src = "shared/app/ota-updater.js";
-            s.async = false;
-            document.head.appendChild(s);
-        })();
-    </script>
+    <script src="shared/app/ota-updater.js"></script>
     <script src="shared/notifications/core.js"></script>
     <script src="shared/audio/bell.js"></script>
     <script src="shared/app/audio-controls.js"></script>

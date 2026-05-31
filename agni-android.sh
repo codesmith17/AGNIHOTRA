@@ -70,6 +70,18 @@ ADB commands:
   adb-logs-ota
       Stream only self-hosted OTA / notifyAppReady logs.
 
+  adb-logs-splash
+      Stream splash / version lines ([AGNIHOTRA][SPLASH]).
+
+  adb-bundle-info
+      List OTA bundles on device and last Capgo load line from logcat.
+
+  adb-pull-bundle-index [dest]
+      Pull active bundle index.html (default adapters/logs/device-bundle/index.html).
+
+  adb-reset-ota
+      Delete OTA bundles so next launch uses builtin APK web assets.
+
   screenshot [file_name]
       Take screenshot from device and save under release/widget-screenshots/.
       Default file_name: screenshot-YYYYmmdd-HHMMSS.png
@@ -189,6 +201,42 @@ cmd_adb_logs_ota() {
   adb logcat -v time '*:I' | awk '/AGNIHOTRA\]\[OTA/ { print }'
 }
 
+cmd_adb_logs_splash() {
+  adb logcat -v time '*:I' | awk '/AGNIHOTRA\]\[SPLASH/ { print }'
+}
+
+cmd_adb_bundle_info() {
+  adb shell "run-as $DEFAULT_PACKAGE ls -la files/versions 2>/dev/null || echo '(no OTA bundles — using builtin APK assets)'"
+  adb logcat -d -v time 2>/dev/null | awk '/CapgoUpdater.*Version successfully loaded/ { print; exit }' || true
+}
+
+cmd_adb_pull_bundle_index() {
+  local dest="${1:-$PROJECT_DIR/adapters/logs/device-bundle/index.html}"
+  mkdir -p "$(dirname "$dest")"
+  local bundle_id
+  bundle_id="$(adb shell "run-as $DEFAULT_PACKAGE ls files/versions 2>/dev/null" | awk 'NF==1 && $1!="." && $1!=".." { print $1; exit }')"
+  if [[ -z "$bundle_id" ]]; then
+    echo "No OTA bundle on device — app is using builtin APK assets." >&2
+    exit 1
+  fi
+  adb exec-out "run-as $DEFAULT_PACKAGE cat files/versions/${bundle_id}/index.html" >"$dest"
+  echo "Pulled files/versions/${bundle_id}/index.html -> $dest ($(wc -c <"$dest" | tr -d ' ') bytes)"
+  if grep -q appSplash "$dest" 2>/dev/null; then
+    echo "Bundle HTML includes #appSplash (splash UI present)."
+  else
+    echo "Bundle HTML has NO #appSplash — reinstall/reset OTA or wait for a newer bundle." >&2
+  fi
+}
+
+cmd_adb_reset_ota() {
+  adb shell "run-as $DEFAULT_PACKAGE rm -rf files/versions" 2>/dev/null || {
+    echo "run-as failed; clearing app data (you will need to re-grant permissions)…" >&2
+    adb shell pm clear "$DEFAULT_PACKAGE"
+  }
+  echo "OTA bundles cleared. Launch the app to load builtin APK web assets."
+  adb shell am force-stop "$DEFAULT_PACKAGE" 2>/dev/null || true
+}
+
 cmd_screenshot() {
   ensure_release_dir
   local file_name="${1:-}"
@@ -224,6 +272,10 @@ case "$command" in
   adb-logs-location) cmd_adb_logs_location ;;
   adb-logs-vibrate) cmd_adb_logs_vibrate ;;
   adb-logs-ota) cmd_adb_logs_ota ;;
+  adb-logs-splash) cmd_adb_logs_splash ;;
+  adb-bundle-info) cmd_adb_bundle_info ;;
+  adb-pull-bundle-index) cmd_adb_pull_bundle_index "${1:-}" ;;
+  adb-reset-ota) cmd_adb_reset_ota ;;
   screenshot) cmd_screenshot "${1:-}" ;;
   *)
     echo "Unknown command: $command" >&2
