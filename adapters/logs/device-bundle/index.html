@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en" translate="no" class="notranslate">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#ff7f32">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="google" content="notranslate">
+    <meta name="googlebot" content="notranslate">
+    <meta name="robots" content="notranslate">
+    <meta http-equiv="Content-Language" content="en,hi,mr">
+    <title>EternalAgni | Precise Agnihotra Timings</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/images/app-icon.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="assets/images/app-icon.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="assets/images/app-icon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="assets/images/app-icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="assets/images/app-icon.png">
+    <link rel="apple-touch-icon" href="assets/images/app-icon.png">
+    <link rel="shortcut icon" href="assets/images/app-icon.png">
+    <link rel="stylesheet" href="https://icono-49d6.kxcdn.com/icono.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&family=Playfair+Display:wght@700&family=Noto+Sans+Devanagari:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body translate="no" class="notranslate">
+    <div id="offline-indicator" style="display: none; background: #ff4500; color: white; text-align: center; padding: 5px; font-size: 0.8rem; position: fixed; top: 0; left: 0; right: 0; z-index: 1001;">
+        <i class="fas fa-plane-slash"></i> Offline Mode - Using Cached Timings
+    </div>
+
+    <nav>
+        <div id="portrait-frame">
+            <img id="portrait" src="assets/images/eternalagni-icon.png" alt="EternalAgni Icon">
+            <h1 id="title">EternalAgni</h1>
+        </div>
+        <input type="checkbox" id="nav-check">
+        <div class="nav-icon">
+            <label for="nav-check" class="nav-menu-toggle" id="navMenuToggle" aria-label="Open menu" aria-expanded="false" aria-controls="navMenuPanel">
+                <span class="nav-menu-bar" aria-hidden="true"></span>
+                <span class="nav-menu-bar" aria-hidden="true"></span>
+                <span class="nav-menu-bar" aria-hidden="true"></span>
+            </label>
+        </div>
+        <ul class="nav-links" id="navMenuPanel">
+            <li><a href="#home"><span class="nav-link-icon nav-link-icon--home" aria-hidden="true"><i class="fa-solid fa-house"></i></span><span class="nav-link-text" data-i18n="nav.home">HOME</span></a></li>
+            <li><a href="#about-agnihotra"><span class="nav-link-icon nav-link-icon--about" aria-hidden="true"><i class="fa-solid fa-fire"></i></span><span class="nav-link-text" data-i18n="nav.about">ABOUT</span></a></li>
+            <li><a href="#mantras"><span class="nav-link-icon nav-link-icon--mantras" aria-hidden="true"><i class="fa-solid fa-om"></i></span><span class="nav-link-text" data-i18n="nav.mantras">MANTRAS</span></a></li>
+            <li><a href="#schedule"><span class="nav-link-icon nav-link-icon--schedule" aria-hidden="true"><i class="fa-solid fa-calendar-days"></i></span><span class="nav-link-text" data-i18n="nav.schedule">SCHEDULE</span></a></li>
+            <li><a href="settings.html"><span class="nav-link-icon nav-link-icon--settings" aria-hidden="true"><i class="fa-solid fa-gear"></i></span><span class="nav-link-text">SETTINGS</span></a></li>
+            <li><a href="support.html"><span class="nav-link-icon nav-link-icon--support" aria-hidden="true"><i class="fa-solid fa-life-ring"></i></span><span class="nav-link-text">SUPPORT</span></a></li>
+            <li class="nav-lang-toggle-item">
+                <button id="languageToggle" type="button" class="language-toggle-btn">हिंदी</button>
+            </li>
+            <li class="nav-lang-dropdown-item">
+                <div class="nav-lang-custom" id="navLangCustom">
+                    <button type="button" id="navLangTrigger" class="nav-lang-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="navLangMenu">
+                        <span class="nav-lang-trigger-icon" aria-hidden="true"><i class="fas fa-globe"></i></span>
+                        <span id="navLangTriggerLabel">English</span>
+                        <span class="nav-lang-trigger-chevron" aria-hidden="true"><i class="fas fa-chevron-down"></i></span>
+                    </button>
+                    <ul id="navLangMenu" class="nav-lang-menu hidden" role="listbox" aria-label="Language">
+                        <li><button type="button" class="nav-lang-option" role="option" data-lang="en">English</button></li>
+                        <li><button type="button" class="nav-lang-option" role="option" data-lang="hi">हिन्दी</button></li>
+                        <li><button type="button" class="nav-lang-option" role="option" data-lang="mr">मराठी</button></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-lang-item">
+                <p class="nav-lang-label" data-i18n="nav.language">Language</p>
+                <div class="nav-lang-switcher" aria-label="Language selector">
+                    <button type="button" class="lang-option" data-lang="en">English</button>
+                    <button type="button" class="lang-option" data-lang="hi">हिन्दी</button>
+                    <button type="button" class="lang-option" data-lang="mr">मराठी</button>
+                </div>
+            </li>
+        </ul>
+    </nav>
+
+    <header class="hero timings-hero" id="home">
+        <video autoplay muted loop playsinline class="hero-video" poster="assets/images/eternalagni-icon.png">
+            <source src="assets/video/fire-background.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+        <div class="timings-hero-inner fade-in">
+            <p class="hero-eyebrow" data-i18n="hero.title">Agnihotra Timings &amp; Practice</p>
+
+            <button type="button" id="locationPlaceTrigger" class="location-info location-info--hero location-place-trigger location-place-trigger--callout" aria-haspopup="dialog" aria-expanded="false" aria-controls="placePickerSheet" data-i18n-aria="places.triggerAria" aria-label="Location and saved places. Tap to switch.">
+                <span class="location-place-switch-banner">
+                    <span class="location-place-switch-icon" aria-hidden="true"><i class="fas fa-right-left"></i></span>
+                    <span id="locationPlaceHint" class="location-place-hint" data-i18n="places.tapToSwitch">Tap here · switch place</span>
+                    <span class="location-place-chevron" aria-hidden="true"><i class="fas fa-chevron-down"></i></span>
+                </span>
+                <div id="locationStatus" class="location-status" aria-live="polite" style="display: none;">
+                    <span class="loading-spinner" aria-hidden="true"></span>
+                    <span id="locationLoadingText" data-i18n="dashboard.detectingLocation">Detecting your location...</span>
+                </div>
+                <p id="userLocation"></p>
+            </button>
+
+            <div class="card upcoming-times upcoming-times--hero">
+                <h2 class="section-title" data-i18n="dashboard.nextAgnihotra">Upcoming Agnihotra Timings</h2>
+                <div id="upcomingCountdown" class="upcoming-countdown-card"></div>
+                <ul id="upcomingTimes" class="times-list"></ul>
+            </div>
+        </div>
+        <a class="hero-scroll-cue" href="#today-tomorrow" aria-label="Scroll to more timings">
+            <i class="fas fa-chevron-down"></i>
+        </a>
+    </header>
+
+    <section class="timings-secondary" id="today-tomorrow">
+        <div class="content-wrap">
+            <div class="timing-grid timing-grid--secondary">
+                <div class="card today-times">
+                    <h2 class="section-title" data-i18n="dashboard.todayTimings">Today's Timings</h2>
+                    <ul id="todayTimes" class="times-list"></ul>
+                </div>
+
+                <div class="card tomorrow-times">
+                    <h2 class="section-title" data-i18n="dashboard.tomorrowTimings">Tomorrow's Timings</h2>
+                    <ul id="tomorrowTimes" class="times-list"></ul>
+                </div>
+            </div>
+
+            <div class="test-reminder-wrap">
+                <button id="testReminderBtn" type="button" class="test-reminder-btn">Test reminder</button>
+                <button id="mockReminderBtn" type="button" class="test-reminder-btn test-reminder-btn--secondary">Mock reminder</button>
+                <button id="mockSunriseBtn" type="button" class="test-reminder-btn test-reminder-btn--secondary" data-i18n="notifications.mockSunriseButton">Test sunrise fire in 10s</button>
+                <button id="mockSunsetBtn" type="button" class="test-reminder-btn test-reminder-btn--secondary" data-i18n="notifications.mockSunsetButton">Test sunset fire in 10s</button>
+                <p id="testReminderStatus" class="test-reminder-status"></p>
+                <p id="mockCountdownStatus" class="test-reminder-status"></p>
+            </div>
+        </div>
+    </section>
+
+    <section class="secondary-section about-section fade-in" id="about-agnihotra">
+        <h2 data-i18n="about.title">What is Agnihotra?</h2>
+        <p class="section-desc" data-i18n="hero.subtitle">Get local sunrise and sunset timings for Agnihotra, plus a simple materials and mantra reference for daily practice.</p>
+        <div class="about-grid">
+            <div class="about-item">
+                <i class="fas fa-mountain fa-2x"></i>
+                <h3 data-i18n="about.rhythm.title">Sunrise &amp; Sunset Practice</h3>
+                <p data-i18n="about.rhythm.desc">Agnihotra is traditionally performed at local sunrise and sunset, so accurate timing and location matter.</p>
+            </div>
+            <div class="about-item">
+                <i class="fas fa-fire fa-2x"></i>
+                <h3 data-i18n="about.purification.title">Location-Based Timings</h3>
+                <p data-i18n="about.purification.desc">The app uses your coordinates to calculate timings for your current place and keeps a schedule ready.</p>
+            </div>
+            <div class="about-item">
+                <i class="fas fa-leaf fa-2x"></i>
+                <h3 data-i18n="about.healing.title">Practice Reference</h3>
+                <p data-i18n="about.healing.desc">Use the materials list and mantras as a quick reference, and follow your teacher or tradition for ritual details.</p>
+            </div>
+        </div>
+        <a href="#home" class="btn-primary btn-primary--soft about-back-cta" data-i18n="hero.cta">Get Timings</a>
+    </section>
+    
+    <section class="secondary-section materials-section fade-in" id="materials">
+        <center>
+            <h2 data-i18n="materials.title">Five Essential Materials</h2>
+            <p class="section-desc" data-i18n="materials.subtitle">A simple checklist of commonly used Agnihotra materials and the exact timing reference.</p>
+        </center>
+        <div class="materials-grid">
+            <div class="material-card">
+                <div class="material-icon">
+                    <img src="assets/images/copper-pyramid.jpg" alt="Copper Pyramid" loading="lazy">
+                </div>
+                <h3 data-i18n="materials.copper.title">Copper Pyramid</h3>
+                <p data-i18n="materials.copper.desc">A copper Agnihotra vessel of accepted shape and size, used for the fire offering.</p>
+            </div>
+            <div class="material-card">
+                <div class="material-icon">
+                    <img src="assets/images/cow-dung-cakes.webp" alt="Dried Cow Dung" loading="lazy">
+                </div>
+                <h3 data-i18n="materials.dung.title">Dried Cow Dung</h3>
+                <p data-i18n="materials.dung.desc">Used as the traditional fuel for preparing the Agnihotra fire.</p>
+            </div>
+            <div class="material-card">
+                <div class="material-icon">
+                    <img src="assets/images/cow-ghee.jpg" alt="Pure Cow Ghee" loading="lazy">
+                </div>
+                <h3 data-i18n="materials.ghee.title">Pure Cow Ghee</h3>
+                <p data-i18n="materials.ghee.desc">Clarified butter from cow's milk, used with rice for the offerings.</p>
+            </div>
+            <div class="material-card">
+                <div class="material-icon">
+                    <img src="assets/images/unpolished-rice-grains.jpg" alt="Unpolished Rice" loading="lazy">
+                </div>
+                <h3 data-i18n="materials.rice.title">Unpolished Rice</h3>
+                <p data-i18n="materials.rice.desc">Whole, unbroken grains are commonly used with cow ghee for the offerings.</p>
+            </div>
+            <div class="material-card">
+                <div class="material-icon">
+                    <img src="assets/images/agnihotra-timing-reference.jpg" alt="Precise Timing" loading="lazy">
+                </div>
+                <h3 data-i18n="materials.timing.title">Precise Timing</h3>
+                <p data-i18n="materials.timing.desc">Use the listed local sunrise and sunset time for the selected location.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="secondary-section mantras-container" id="mantras">
+        <center>
+            <h2 class="fade-in" data-i18n="mantras.title">Agnihotra Mantras</h2>
+            <p class="mantra-desc" data-i18n="mantras.subtitle">Sunrise and sunset mantras are included as a quick practice reference.</p>
+        </center>
+
+        <div class="mantras-section fade-in">
+            <div class="mantra-card">
+                <div class="mantra-header">
+                    <i class="fas fa-sun fa-3x" style="color: #FFD700;"></i>
+                    <h3 data-i18n="mantras.sunrise.title">Sunrise Mantra</h3>
+                </div>
+                
+                <div class="audio-player-wrapper">
+                    <audio id="sunrise-audio" class="mantra-audio" preload="metadata">
+                        <source src="assets/audio/mantras/sunrise-mantra.mpeg" type="audio/mpeg">
+                        Your browser does not support the audio element.
+                    </audio>
+                    <div class="custom-audio-controls">
+                        <button class="play-btn" onclick="toggleAudio('sunrise-audio', this)">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <div class="audio-info">
+                            <div class="audio-header">
+                                <span class="audio-title" data-i18n="mantras.sunrise.audioTitle">Sūrya Mantra</span>
+                                <div class="audio-times">
+                                    <span id="sunrise-current">0:00</span>
+                                    <span class="time-separator">/</span>
+                                    <span id="sunrise-duration">0:00</span>
+                                </div>
+                            </div>
+                            <div class="progress-container">
+                                <div class="progress-bar" id="sunrise-progress-bar">
+                                    <div class="progress-fill" id="sunrise-progress">
+                                        <div class="progress-handle"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mantra-text">
+                    <div class="sanskrit">
+                        <p>सूर्याय स्वाहा । सूर्याय इदं न मम ।</p>
+                        <p>प्रजापतये स्वाहा । प्रजापतये इदं न मम ॥</p>
+                    </div>
+                    <div class="transliteration">
+                        <p>Sūryāya Svāhā | Sūryāya Idaṃ Na Mama |</p>
+                        <p>Prajāpataye Svāhā | Prajāpataye Idaṃ Na Mama ||</p>
+                    </div>
+                    <div class="translation">
+                        <p><em>"To the Sun, salutations. This is not mine, but Yours.</em></p>
+                        <p><em>To Prajapati (Lord of Creation), salutations. This is not mine, but Yours."</em></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mantra-card">
+                <div class="mantra-header">
+                    <i class="fas fa-moon fa-3x" style="color: #4B0082;"></i>
+                    <h3 data-i18n="mantras.sunset.title">Sunset Mantra</h3>
+                </div>
+                
+                <div class="audio-player-wrapper">
+                    <audio id="sunset-audio" class="mantra-audio" preload="metadata">
+                        <source src="assets/audio/mantras/sunset-mantra.mpeg" type="audio/mpeg">
+                        Your browser does not support the audio element.
+                    </audio>
+                    <div class="custom-audio-controls">
+                        <button class="play-btn" onclick="toggleAudio('sunset-audio', this)">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <div class="audio-info">
+                            <div class="audio-header">
+                                <span class="audio-title" data-i18n="mantras.sunset.audioTitle">Agni Mantra</span>
+                                <div class="audio-times">
+                                    <span id="sunset-current">0:00</span>
+                                    <span class="time-separator">/</span>
+                                    <span id="sunset-duration">0:00</span>
+                                </div>
+                            </div>
+                            <div class="progress-container">
+                                <div class="progress-bar" id="sunset-progress-bar">
+                                    <div class="progress-fill" id="sunset-progress">
+                                        <div class="progress-handle"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mantra-text">
+                    <div class="sanskrit">
+                        <p>अग्नये स्वाहा । अग्नये इदं न मम ।</p>
+                        <p>प्रजापतये स्वाहा । प्रजापतये इदं न मम ॥</p>
+                    </div>
+                    <div class="transliteration">
+                        <p>Agnaye Svāhā | Agnaye Idaṃ Na Mama |</p>
+                        <p>Prajāpataye Svāhā | Prajāpataye Idaṃ Na Mama ||</p>
+                    </div>
+                    <div class="translation">
+                        <p><em>"To Fire (Agni), salutations. This is not mine, but Yours.</em></p>
+                        <p><em>To Prajapati (Lord of Creation), salutations. This is not mine, but Yours."</em></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mantra-card">
+                <div class="mantra-header">
+                    <i class="fas fa-praying-hands fa-3x" style="color: #FF8C00;"></i>
+                    <h3 data-i18n="mantras.panchasheel.title">Panchasheel Pratidnya</h3>
+                </div>
+
+                <div class="audio-player-wrapper">
+                    <audio id="panchasheel-audio" class="mantra-audio" preload="metadata">
+                        <source src="assets/audio/mantras/panchasheel-pratidnya.mpeg" type="audio/mpeg">
+                        Your browser does not support the audio element.
+                    </audio>
+                    <div class="custom-audio-controls">
+                        <button class="play-btn" onclick="toggleAudio('panchasheel-audio', this)">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <div class="audio-info">
+                            <div class="audio-header">
+                                <span class="audio-title" data-i18n="mantras.panchasheel.audioTitle">Panchasheel Pratidnya</span>
+                                <div class="audio-times">
+                                    <span id="panchasheel-current">0:00</span>
+                                    <span class="time-separator">/</span>
+                                    <span id="panchasheel-duration">0:00</span>
+                                </div>
+                            </div>
+                            <div class="progress-container">
+                                <div class="progress-bar" id="panchasheel-progress-bar">
+                                    <div class="progress-fill" id="panchasheel-progress">
+                                        <div class="progress-handle"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mantra-card">
+                <div class="mantra-header">
+                    <i class="fas fa-book-open fa-3x" style="color: #2E8B57;"></i>
+                    <h3 data-i18n="mantras.saptashloki.title">Saptashloki</h3>
+                </div>
+
+                <div class="audio-player-wrapper">
+                    <audio id="saptashloki-audio" class="mantra-audio" preload="metadata">
+                        <source src="assets/audio/mantras/saptashloki.mpeg" type="audio/mpeg">
+                        Your browser does not support the audio element.
+                    </audio>
+                    <div class="custom-audio-controls">
+                        <button class="play-btn" onclick="toggleAudio('saptashloki-audio', this)">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <div class="audio-info">
+                            <div class="audio-header">
+                                <span class="audio-title" data-i18n="mantras.saptashloki.audioTitle">Saptashloki</span>
+                                <div class="audio-times">
+                                    <span id="saptashloki-current">0:00</span>
+                                    <span class="time-separator">/</span>
+                                    <span id="saptashloki-duration">0:00</span>
+                                </div>
+                            </div>
+                            <div class="progress-container">
+                                <div class="progress-bar" id="saptashloki-progress-bar">
+                                    <div class="progress-fill" id="saptashloki-progress">
+                                        <div class="progress-handle"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mantra-card">
+                <div class="mantra-header">
+                    <i class="fas fa-om fa-3x" style="color: #8B008B;"></i>
+                    <h3 data-i18n="mantras.trisatya.title">Trisatya Sharanagati</h3>
+                </div>
+
+                <div class="audio-player-wrapper">
+                    <audio id="trisatya-audio" class="mantra-audio" preload="metadata">
+                        <source src="assets/audio/mantras/trisatya-sharanagati.mpeg" type="audio/mpeg">
+                        Your browser does not support the audio element.
+                    </audio>
+                    <div class="custom-audio-controls">
+                        <button class="play-btn" onclick="toggleAudio('trisatya-audio', this)">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <div class="audio-info">
+                            <div class="audio-header">
+                                <span class="audio-title" data-i18n="mantras.trisatya.audioTitle">Trisatya Sharanagati</span>
+                                <div class="audio-times">
+                                    <span id="trisatya-current">0:00</span>
+                                    <span class="time-separator">/</span>
+                                    <span id="trisatya-duration">0:00</span>
+                                </div>
+                            </div>
+                            <div class="progress-container">
+                                <div class="progress-bar" id="trisatya-progress-bar">
+                                    <div class="progress-fill" id="trisatya-progress">
+                                        <div class="progress-handle"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="secondary-section" id="schedule">
+        <center>
+            <h2 class="fade-in" data-i18n="schedule.title">Agnihotra Schedule</h2>
+        </center>
+
+        <div class="schedule-section fade-in">
+            <div id="scheduleLoading" class="schedule-loading" style="display: none;" aria-live="polite">
+                <span class="loading-spinner" aria-hidden="true"></span>
+                <span data-i18n="schedule.preparing">Preparing 3-month schedule in background...</span>
+            </div>
+            <div class="schedule-export-panel">
+                <h3 data-i18n="schedule.generator.title">Calendar Generator</h3>
+                <div class="schedule-export-controls">
+                    <label for="scheduleExportStartDate" data-i18n="schedule.export.startLabel">Start date</label>
+                    <input id="scheduleExportStartDate" type="text" required readonly autocomplete="off" />
+                    <label for="scheduleExportEndDate" data-i18n="schedule.export.endLabel">End date</label>
+                    <input id="scheduleExportEndDate" type="text" required readonly autocomplete="off" />
+                    <button id="exportPdfBtn" type="button" class="test-reminder-btn test-reminder-btn--secondary" data-i18n="schedule.export.pdfButton">Export PDF</button>
+                    <button id="exportIcsBtn" type="button" class="test-reminder-btn" data-i18n="schedule.export.icsButton">Export ICS (10 min reminder)</button>
+                </div>
+            </div>
+            <h3 class="schedule-table-heading" data-i18n="schedule.table.title">3-Month Timing Schedule</h3>
+            <div class="table-container">
+                <table id="timingsTable">
+                    <thead>
+                        <tr>
+                            <th data-i18n="schedule.date">Date</th>
+                            <th data-i18n="schedule.sunrise">Sunrise</th>
+                            <th data-i18n="schedule.sunset">Sunset</th>
+                        </tr>
+                    </thead>
+                    <tbody id="timingsTableBody">
+                        <!-- Data will be inserted here by script.js -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <div id="agniDialog" class="agni-dialog hidden" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="agniDialogTitle">
+        <div class="agni-dialog-backdrop" data-agni-dialog-dismiss></div>
+        <div class="agni-dialog-card">
+            <button type="button" class="agni-dialog-close" id="agniDialogCloseBtn" aria-label="Close">
+                <i class="fas fa-times"></i>
+            </button>
+            <div class="agni-dialog-icon" id="agniDialogIcon" aria-hidden="true">
+                <i class="fas fa-map-marker-alt"></i>
+            </div>
+            <h3 id="agniDialogTitle" class="agni-dialog-title">Save place</h3>
+            <p id="agniDialogMessage" class="agni-dialog-message hidden"></p>
+            <p id="agniDialogPreview" class="agni-dialog-preview hidden"></p>
+            <div id="agniDialogForm" class="agni-dialog-form hidden">
+                <label id="agniDialogLabel" class="agni-dialog-label" for="agniDialogInput">Place name</label>
+                <input id="agniDialogInput" class="agni-dialog-input" type="text" maxlength="48" autocomplete="off" inputmode="text" />
+                <div class="agni-dialog-chips" id="agniDialogChips" role="group" aria-label="Quick names">
+                    <button type="button" class="agni-dialog-chip" data-chip-value="Home">Home</button>
+                    <button type="button" class="agni-dialog-chip" data-chip-value="Office">Office</button>
+                    <button type="button" class="agni-dialog-chip" data-chip-value="Temple">Temple</button>
+                </div>
+            </div>
+            <div class="agni-dialog-actions" id="agniDialogActions">
+                <button type="button" id="agniDialogCancelBtn" class="agni-dialog-btn agni-dialog-btn--secondary">Cancel</button>
+                <button type="button" id="agniDialogConfirmBtn" class="agni-dialog-btn agni-dialog-btn--primary">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="placePickerSheet" class="place-picker-sheet hidden" aria-hidden="true" role="dialog" aria-labelledby="placePickerTitle">
+        <div class="place-picker-backdrop"></div>
+        <div class="place-picker-panel">
+            <div class="place-picker-header">
+                <h3 id="placePickerTitle" data-i18n="places.title">Choose place</h3>
+                <button type="button" id="placePickerCloseBtn" class="place-picker-close" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <p class="place-picker-desc" data-i18n="places.subtitle">Switch between saved places (Home, Office, …) for timings and reminders.</p>
+            <p class="place-picker-tip" data-i18n="places.sheetTip">You opened this from the location bar above — switch anytime.</p>
+            <ul id="placePickerList" class="place-picker-list"></ul>
+            <div class="place-picker-actions">
+                <button type="button" id="placePickerAddBtn" class="place-picker-action place-picker-action--primary">
+                    <i class="fas fa-plus"></i>
+                    <span data-i18n="places.saveCurrent">Save current place</span>
+                </button>
+                <button type="button" id="placePickerAutoBtn" class="place-picker-action place-picker-action--secondary">
+                    <i class="fas fa-crosshairs"></i>
+                    <span data-i18n="places.currentGps">Current location (GPS)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p data-i18n="footer.text">&copy; 2026 EternalAgni. Spreading the Light of Agnihotra.</p>
+    </footer>
+
+    <script>
+        window.AGNI_RUNTIME_CONFIG = {
+            enableTestReminder: "false",
+            enableDebugOverlay: "false",
+            forceOffline: "false",
+            testReminderSeconds: "20",
+            enableRemoteLogCapture: "false",
+            sentryDsn: "",
+            appRelease: "1.0.2",
+            appEnvironment: "production"
+        };
+    </script>
+    <script src="https://browser.sentry-cdn.com/8.51.0/bundle.tracing.min.js" crossorigin="anonymous"></script>
+    <script src="shared/app/ota-updater.js"></script>
+    <script src="shared/notifications/core.js"></script>
+    <script src="shared/audio/bell.js"></script>
+    <script src="shared/app/audio-controls.js"></script>
+    <script src="shared/app/permissions-gate.js"></script>
+    <script src="shared/app/saved-places.js"></script>
+    <script src="shared/diagnostics/instrumentation.js"></script>
+    <script src="shared/diagnostics/payload-builder.js"></script>
+    <script src="shared/diagnostics/support-runtime.js"></script>
+    <script src="adapters/web/notifications.adapter.js"></script>
+    <script src="adapters/android/notifications.adapter.js"></script>
+    <script src="notifications.js"></script>
+    <script src="timings-engine.js"></script>
+    <script src="vendor/jspdf.umd.min.js"></script>
+    <script src="shared/export/pdf-export.js"></script>
+    <script src="shared/export/ics-export.js"></script>
+    <script src="script.js"></script>
+</body>
+
+</html>

@@ -13,10 +13,24 @@
             } catch (e) {}
             document.documentElement.classList.add(isNative ? 'agni-platform-native' : 'agni-platform-web');
             window.AgnihotraRuntime = { isNative: isNative, isWeb: !isNative, platform: isNative ? 'native' : 'web' };
+            if (isNative) {
+                document.documentElement.classList.add('agni-splash-active');
+                window.AgnihotraSplashStartedAt = Date.now();
+            }
         })();
     </script>
     <style>
         html.agni-platform-web #appSplash { display: none !important; visibility: hidden !important; }
+        /* Native: cover the app until splash script dismisses — splash script is at end of body */
+        html.agni-platform-native.agni-splash-active body { overflow: hidden; }
+        html.agni-platform-native.agni-splash-active #appSplash {
+            display: flex !important;
+            visibility: visible !important;
+        }
+        html.agni-platform-native.agni-splash-active body > *:not(#appSplash) {
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
     </style>
     <meta name="theme-color" content="#ff7f32">
     <meta name="mobile-web-app-capable" content="yes">
@@ -42,7 +56,7 @@
 </head>
 
 <body translate="no" class="notranslate">
-    <div id="appSplash" class="app-splash agni-native-only" role="status" aria-label="EternalAgni loading" hidden>
+    <div id="appSplash" class="app-splash agni-native-only" role="status" aria-label="EternalAgni loading">
         <div class="app-splash-vignette" aria-hidden="true"></div>
         <div class="app-splash-aura" aria-hidden="true"></div>
         <div class="app-splash-embers" aria-hidden="true">
@@ -581,7 +595,17 @@
                 return;
             }
 
-            splash.removeAttribute("hidden");
+            if (!document.documentElement.classList.contains("agni-splash-active")) {
+                document.documentElement.classList.add("agni-splash-active");
+                window.AgnihotraSplashStartedAt = Date.now();
+            }
+            console.info(
+                "[AGNIHOTRA][SPLASH] show " +
+                JSON.stringify({
+                    release: (window.AGNI_RUNTIME_CONFIG && window.AGNI_RUNTIME_CONFIG.appRelease) || "",
+                    domReady: document.readyState
+                })
+            );
 
             var versionEl = document.getElementById("appSplashVersion");
             var metaEl = document.getElementById("appSplashVersionMeta");
@@ -654,7 +678,7 @@
                     }
 
                     if (!bundleLabel) {
-                        bundleLabel = resolveFromConfig() || formatVersionLabel("1.0.3");
+                        bundleLabel = resolveFromConfig() || formatVersionLabel("1.0.4");
                     }
 
                     if (nativeLabel && bundleLabel && nativeLabel !== bundleLabel) {
@@ -664,21 +688,32 @@
                     }
 
                     setVersionDisplay(bundleLabel, meta);
-                } catch (_) {
+                    console.info(
+                        "[AGNIHOTRA][SPLASH] version " +
+                        JSON.stringify({ bundle: bundleLabel, meta: meta, native: nativeLabel })
+                    );
+                } catch (err) {
+                    console.warn("[AGNIHOTRA][SPLASH] enrich-failed", err && err.message ? err.message : err);
                     resolveFromConfig();
                 }
             })();
 
-            var MIN_VISIBLE_MS = 1600;
-            var MAX_VISIBLE_MS = 4500;
-            var startedAt = Date.now();
+            var MIN_VISIBLE_MS = 2000;
+            var MAX_VISIBLE_MS = 4900;
+            var startedAt = window.AgnihotraSplashStartedAt || Date.now();
             var dismissed = false;
 
             function hideSplash() {
                 if (dismissed) return;
                 dismissed = true;
                 var wait = Math.max(0, MIN_VISIBLE_MS - (Date.now() - startedAt));
+                console.info(
+                    "[AGNIHOTRA][SPLASH] hide-scheduled " +
+                    JSON.stringify({ waitMs: wait, visibleMs: Date.now() - startedAt })
+                );
                 setTimeout(function () {
+                    document.documentElement.classList.remove("agni-splash-active");
+                    document.documentElement.classList.add("agni-splash-done");
                     splash.classList.add("is-hidden");
                     setTimeout(function () {
                         if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
@@ -686,11 +721,15 @@
                 }, wait);
             }
 
-            if (document.readyState === "complete") {
-                hideSplash();
-            } else {
-                window.addEventListener("load", hideSplash, { once: true });
+            function scheduleHideSplash() {
+                if (document.readyState === "complete") {
+                    hideSplash();
+                } else {
+                    window.addEventListener("load", hideSplash, { once: true });
+                }
             }
+
+            scheduleHideSplash();
             setTimeout(hideSplash, MAX_VISIBLE_MS);
             window.AgnihotraHideSplash = hideSplash;
         })();

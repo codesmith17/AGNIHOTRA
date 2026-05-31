@@ -16,7 +16,12 @@
     </style>
 
 
+    <!-- Solid dark launch — no logo; dismissed immediately in MainActivity -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash</item>
+        <item name="android:background">@color/agni_splash_bg</item>
+        <item name="windowSplashScreenBackground">@color/agni_splash_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/agni_splash_icon</item>
+        <item name="windowSplashScreenAnimationDuration">1</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>

@@ -4651,12 +4651,18 @@ html.agni-platform-web .agni-native-only {
   line-height: 1.1;
   letter-spacing: 0.06em;
   font-variant-numeric: tabular-nums;
-  background: linear-gradient(180deg, #fff8e8 0%, #ffd27a 45%, #ff9a3c 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 2px 8px rgba(255, 120, 30, 0.45));
+  color: #ffd27a;
+  text-shadow: 0 2px 8px rgba(255, 120, 30, 0.45);
   animation: splashVersionShimmer 3s ease-in-out infinite;
+}
+
+/* Gradient text is often invisible in Android WebView; keep solid gold on native */
+html.agni-platform-native .app-splash-version-num {
+  background: none;
+  -webkit-background-clip: unset;
+  background-clip: unset;
+  -webkit-text-fill-color: #ffd27a;
+  filter: none;
 }
 
 .app-splash-version-meta {
