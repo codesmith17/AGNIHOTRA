@@ -65,8 +65,14 @@ git tag v1.0.2 && git push origin v1.0.2
 ```
 
 `.github/workflows/ota-release.yml` builds, zips `public/`, writes
-`version.json`, and publishes a **latest** GitHub Release with both assets. You
-can also run it manually from the Actions tab (workflow_dispatch).
+`version.json`, builds a **debug ("test") APK** and a **signed release APK**,
+and publishes a **latest** GitHub Release with all four assets:
+
+- `version.json` + `dist.zip` — the OTA web bundle (auto-applied by installed apps)
+- `agnihotra-v<version>-test-debug.apk` — debug build with verbose logs
+- `agnihotra-v<version>-release.apk` — release build (debug-signed, installable)
+
+You can also run it manually from the Actions tab (workflow_dispatch).
 
 ### Option B — from your machine
 
