@@ -4295,7 +4295,8 @@ body.agni-dialog-open {
   }
 }
 
-@media (orientation: landscape) {
+/* Landscape phones only — do not apply to desktop browsers (public website) */
+@media (orientation: landscape) and (max-height: 520px) {
   .nav-lang-dropdown-item {
     display: list-item !important;
     flex-shrink: 0;
@@ -4326,7 +4327,6 @@ body.agni-dialog-open {
     font-size: 0.6rem;
   }
 
-  /* Keep the open menu inside the viewport's right edge */
   .nav-lang-menu {
     right: 0;
     min-width: 132px;
@@ -4335,7 +4335,57 @@ body.agni-dialog-open {
 }
 
 /* =====================================================================
-   App splash screen (in-app, fades out when ready)
+   Platform split: public website vs Capacitor Android app
+   ===================================================================== */
+html.agni-platform-web .agni-native-only {
+  display: none !important;
+}
+
+/* Desktop website: cleaner nav without app-style icon pills */
+@media (min-width: 769px) {
+  html.agni-platform-web .nav-link-icon {
+    display: none;
+  }
+
+  html.agni-platform-web .nav-links li a {
+    gap: 0;
+    padding: 6px 10px;
+  }
+
+  html.agni-platform-web .nav-icon {
+    display: none !important;
+  }
+
+  html.agni-platform-web #nav-check {
+    display: none !important;
+  }
+
+  html.agni-platform-web .nav-links {
+    position: static;
+    flex-direction: row;
+    visibility: visible;
+    transform: none;
+    background: transparent;
+    box-shadow: none;
+    width: auto;
+    padding: 0;
+  }
+
+  html.agni-platform-web .nav-links li {
+    width: auto;
+  }
+
+  html.agni-platform-web .nav-links li a {
+    width: auto;
+    margin-left: 12px;
+    background: transparent;
+    border: none;
+    text-align: center;
+  }
+}
+
+/* =====================================================================
+   App splash screen (native app only — hidden on public website)
    ===================================================================== */
 .app-splash {
   position: fixed;
@@ -4345,12 +4395,20 @@ body.agni-dialog-open {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0;
   overflow: hidden;
   background:
-    radial-gradient(circle at 50% 38%, #3a1206 0%, #260a04 48%, #170604 100%);
+    radial-gradient(ellipse 120% 80% at 50% 100%, #4a1808 0%, transparent 55%),
+    radial-gradient(circle at 50% 32%, #4a1a08 0%, #1f0804 52%, #0d0402 100%);
   opacity: 1;
-  transition: opacity 0.6s ease, visibility 0.6s ease;
+  transition: opacity 0.65s ease, visibility 0.65s ease;
+}
+
+.app-splash-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 35%, rgba(0, 0, 0, 0.55) 100%);
+  z-index: 1;
 }
 
 .app-splash.is-hidden {
@@ -4421,12 +4479,14 @@ body.agni-dialog-open {
 
 .app-splash-stage {
   position: relative;
-  z-index: 2;
+  z-index: 3;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 0 24px;
+  padding: 0 28px;
+  max-width: 360px;
+  width: 100%;
 }
 
 /* Spinning gradient ring around the logo */
@@ -4552,33 +4612,76 @@ body.agni-dialog-open {
   to { opacity: 1; transform: scale(1); }
 }
 
-/* Version badge */
-.app-splash-version {
-  position: absolute;
-  bottom: max(34px, env(safe-area-inset-bottom, 0px) + 26px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 16px;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: #ffdca6;
-  background: rgba(255, 138, 40, 0.12);
-  border: 1px solid rgba(255, 170, 90, 0.4);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 0 0 14px rgba(255, 130, 40, 0.16);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  animation: splashRise 0.8s ease 0.6s both;
+/* Version card — prominent, always visible on splash */
+.app-splash-version-card {
+  margin-top: 28px;
+  width: min(100%, 280px);
+  padding: 14px 18px 16px;
+  border-radius: 16px;
+  text-align: center;
+  background: linear-gradient(
+    145deg,
+    rgba(255, 200, 120, 0.14) 0%,
+    rgba(255, 120, 40, 0.08) 100%
+  );
+  border: 1px solid rgba(255, 190, 100, 0.35);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 230, 180, 0.25),
+    0 0 40px rgba(255, 100, 20, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: splashVersionIn 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.55s both;
 }
 
-.app-splash-version i {
+.app-splash-version-kicker {
+  margin: 0 0 4px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(255, 210, 150, 0.85);
+}
+
+.app-splash-version-num {
+  margin: 0;
+  font-family: 'Montserrat', system-ui, sans-serif;
+  font-size: clamp(1.75rem, 8vw, 2.15rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, #fff8e8 0%, #ffd27a 45%, #ff9a3c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 8px rgba(255, 120, 30, 0.45));
+  animation: splashVersionShimmer 3s ease-in-out infinite;
+}
+
+.app-splash-version-meta {
+  margin: 8px 0 0;
   font-size: 0.72rem;
-  color: #ffb547;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: rgba(233, 185, 134, 0.9);
+  line-height: 1.35;
+}
+
+@keyframes splashVersionIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes splashVersionShimmer {
+  0%, 100% { filter: drop-shadow(0 2px 8px rgba(255, 120, 30, 0.4)); }
+  50% { filter: drop-shadow(0 4px 14px rgba(255, 160, 60, 0.65)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4592,7 +4695,8 @@ body.agni-dialog-open {
   .app-splash-loader,
   .app-splash-loader span,
   .app-splash-logo-ring,
-  .app-splash-version {
+  .app-splash-version-card,
+  .app-splash-version-num {
     animation: none !important;
   }
 }

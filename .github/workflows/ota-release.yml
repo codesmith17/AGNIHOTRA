@@ -80,19 +80,46 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --no-daemon assembleDebug assembleRelease
 
-      - name: Sign release APK with debug keystore
+      - name: Package and sign APKs for release
         run: |
           V="${{ steps.ver.outputs.version }}"
-          # assembleDebug creates ~/.android/debug.keystore; reuse it so the
-          # release APK is installable without committing a private keystore.
           BT="$(ls -d "$ANDROID_SDK_ROOT"/build-tools/* | sort -V | tail -1)"
           echo "Using build-tools: $BT"
-          mkdir -p release/ota
-          # Debug ("test") APK — already signed by gradle with the debug key.
-          cp android/app/build/outputs/apk/debug/app-debug.apk \
-            "release/ota/agnihotra-v${V}-test-debug.apk"
-          # Release APK — align + sign with the debug keystore.
+          mkdir -p release/ota "$HOME/.android"
+
+          # GitHub runners have no ~/.android/debug.keystore unless we create it
+          # (local dev gets one from Android Studio / Gradle). Same credentials
+          # as the standard Android debug key so installs behave like local builds.
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+          DEBUG_APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$DEBUG_APK" ]; then
+            echo "Debug APK not found at $DEBUG_APK" >&2
+            ls -la android/app/build/outputs/apk/debug/ 2>/dev/null || true
+            exit 1
+          fi
+          cp "$DEBUG_APK" "release/ota/agnihotra-v${V}-test-debug.apk"
+
           UNSIGNED="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          if [ ! -f "$UNSIGNED" ]; then
+            UNSIGNED="android/app/build/outputs/apk/release/app-release.apk"
+          fi
+          if [ ! -f "$UNSIGNED" ]; then
+            echo "Release APK not found under android/app/build/outputs/apk/release/" >&2
+            ls -la android/app/build/outputs/apk/release/ 2>/dev/null || true
+            exit 1
+          fi
+
           "$BT/zipalign" -f -v -p 4 "$UNSIGNED" /tmp/agnihotra-aligned.apk >/dev/null
           "$BT/apksigner" sign \
             --ks "$HOME/.android/debug.keystore" \
@@ -101,7 +128,7 @@ jobs:
             --key-pass pass:android \
             --out "release/ota/agnihotra-v${V}-release.apk" \
             /tmp/agnihotra-aligned.apk
-          "$BT/apksigner" verify --print-certs "release/ota/agnihotra-v${V}-release.apk" || true
+          "$BT/apksigner" verify --print-certs "release/ota/agnihotra-v${V}-release.apk"
           ls -la release/ota
 
       - name: Publish GitHub Release (latest)
