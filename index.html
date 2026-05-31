@@ -28,6 +28,30 @@
 </head>
 
 <body translate="no" class="notranslate">
+    <div id="appSplash" class="app-splash" role="status" aria-label="EternalAgni loading">
+        <div class="app-splash-aura" aria-hidden="true"></div>
+        <div class="app-splash-embers" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="app-splash-stage">
+            <div class="app-splash-logo-ring">
+                <div class="app-splash-flame" aria-hidden="true">
+                    <i class="fa-solid fa-fire"></i>
+                </div>
+                <img class="app-splash-logo" src="assets/images/eternalagni-icon.png" alt="" width="84" height="84">
+            </div>
+            <h1 class="app-splash-title">EternalAgni</h1>
+            <p class="app-splash-tagline">Sacred Agnihotra Timings</p>
+            <div class="app-splash-loader" aria-hidden="true">
+                <span></span><span></span><span></span>
+            </div>
+        </div>
+        <div class="app-splash-version">
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+            <span id="appSplashVersion">v—</span>
+        </div>
+    </div>
     <div id="offline-indicator" style="display: none; background: #ff4500; color: white; text-align: center; padding: 5px; font-size: 0.8rem; position: fixed; top: 0; left: 0; right: 0; z-index: 1001;">
         <i class="fas fa-plane-slash"></i> Offline Mode - Using Cached Timings
     </div>
@@ -530,6 +554,43 @@
             appRelease: "__AGNI_APP_RELEASE__",
             appEnvironment: "__AGNI_APP_ENV__"
         };
+    </script>
+    <script>
+        (function () {
+            var splash = document.getElementById("appSplash");
+            if (!splash) return;
+            var rawVersion = String(window.AGNI_RUNTIME_CONFIG && window.AGNI_RUNTIME_CONFIG.appRelease || "").trim();
+            if (!rawVersion || rawVersion === "dev" || rawVersion.indexOf("__AGNI") === 0) {
+                rawVersion = "1.0.3";
+            }
+            var label = document.getElementById("appSplashVersion");
+            if (label) label.textContent = "v" + rawVersion.replace(/^v/i, "");
+
+            var MIN_VISIBLE_MS = 1400; // let the animation breathe
+            var MAX_VISIBLE_MS = 4000; // never trap the user behind the splash
+            var startedAt = Date.now();
+            var dismissed = false;
+
+            function hideSplash() {
+                if (dismissed) return;
+                dismissed = true;
+                var wait = Math.max(0, MIN_VISIBLE_MS - (Date.now() - startedAt));
+                setTimeout(function () {
+                    splash.classList.add("is-hidden");
+                    setTimeout(function () {
+                        if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+                    }, 650);
+                }, wait);
+            }
+
+            if (document.readyState === "complete") {
+                hideSplash();
+            } else {
+                window.addEventListener("load", hideSplash, { once: true });
+            }
+            setTimeout(hideSplash, MAX_VISIBLE_MS); // safety cap
+            window.AgnihotraHideSplash = hideSplash;
+        })();
     </script>
     <script src="https://browser.sentry-cdn.com/8.51.0/bundle.tracing.min.js" crossorigin="anonymous"></script>
     <script src="shared/app/ota-updater.js"></script>
