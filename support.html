@@ -3,6 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>
+    (function () {
+      var isNative = false;
+      try {
+        isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+      } catch (e) {}
+      document.documentElement.classList.add(isNative ? 'agni-platform-native' : 'agni-platform-web');
+      window.AgnihotraRuntime = { isNative: isNative, isWeb: !isNative, platform: isNative ? 'native' : 'web' };
+    })();
+  </script>
   <meta name="theme-color" content="#ff7f32">
   <title>EternalAgni Help & Support</title>
   <link rel="icon" type="image/png" sizes="192x192" href="assets/images/app-icon-192.png">
@@ -64,7 +74,14 @@
       appEnvironment: "__AGNI_APP_ENV__"
     };
   </script>
-  <script src="shared/app/ota-updater.js"></script>
+  <script>
+    (function () {
+      if (!window.AgnihotraRuntime || !window.AgnihotraRuntime.isNative) return;
+      var s = document.createElement("script");
+      s.src = "shared/app/ota-updater.js";
+      document.head.appendChild(s);
+    })();
+  </script>
   <script src="shared/diagnostics/instrumentation.js"></script>
   <script src="shared/diagnostics/payload-builder.js"></script>
   <script src="shared/settings/settings-page.js"></script>

@@ -9,10 +9,18 @@ const forceOfflineMode =
 const enableRemoteLogCapture =
   String(process.env.AGNI_ENABLE_REMOTE_LOG_CAPTURE ?? 'false').toLowerCase() !== 'false';
 const sentryDsn = String(process.env.AGNI_SENTRY_DSN ?? '').trim();
+const pkgVersion = (() => {
+  try {
+    return String(require('./package.json').version || '').trim();
+  } catch (_) {
+    return '';
+  }
+})();
 const appRelease = String(
   process.env.AGNI_APP_RELEASE ??
     process.env.npm_package_version ??
-    'dev'
+    pkgVersion ??
+    '1.0.0'
 ).trim();
 const appEnv = String(process.env.AGNI_APP_ENV ?? process.env.NODE_ENV ?? 'production').trim();
 const testReminderSeconds = Math.max(
@@ -45,6 +53,7 @@ const filesToCopy = [
     'shared/app/audio-controls.js',
     'shared/app/permissions-gate.js',
     'shared/app/saved-places.js',
+    'shared/app/runtime.js',
     'shared/app/ota-updater.js',
     'shared/diagnostics/instrumentation.js',
     'shared/diagnostics/payload-builder.js',
@@ -93,18 +102,26 @@ filesToCopy.forEach(file => {
         if (!fs.existsSync(destinationDir)) {
             fs.mkdirSync(destinationDir, { recursive: true });
         }
-        if (file === 'index.html') {
-            let indexContent = fs.readFileSync(file, 'utf8');
-            indexContent = indexContent
-                .replace(/__AGNI_ENABLE_TEST_REMINDER__/g, String(enableTestReminder))
-                .replace(/__AGNI_ENABLE_DEBUG_OVERLAY__/g, String(enableDebugOverlay))
-                .replace(/__AGNI_FORCE_OFFLINE__/g, String(forceOfflineMode))
-                .replace(/__AGNI_TEST_REMINDER_SECONDS__/g, String(testReminderSeconds))
-                .replace(/__AGNI_ENABLE_REMOTE_LOG_CAPTURE__/g, String(enableRemoteLogCapture))
-                .replace(/__AGNI_SENTRY_DSN__/g, escapeForInlineConfig(sentryDsn))
+        const htmlWithRuntimeConfig =
+            file === 'index.html' ||
+            file === 'settings.html' ||
+            file === 'support.html';
+
+        if (htmlWithRuntimeConfig) {
+            let htmlContent = fs.readFileSync(file, 'utf8');
+            if (file === 'index.html') {
+                htmlContent = htmlContent
+                    .replace(/__AGNI_ENABLE_TEST_REMINDER__/g, String(enableTestReminder))
+                    .replace(/__AGNI_ENABLE_DEBUG_OVERLAY__/g, String(enableDebugOverlay))
+                    .replace(/__AGNI_FORCE_OFFLINE__/g, String(forceOfflineMode))
+                    .replace(/__AGNI_TEST_REMINDER_SECONDS__/g, String(testReminderSeconds))
+                    .replace(/__AGNI_ENABLE_REMOTE_LOG_CAPTURE__/g, String(enableRemoteLogCapture))
+                    .replace(/__AGNI_SENTRY_DSN__/g, escapeForInlineConfig(sentryDsn));
+            }
+            htmlContent = htmlContent
                 .replace(/__AGNI_APP_RELEASE__/g, escapeForInlineConfig(appRelease))
                 .replace(/__AGNI_APP_ENV__/g, escapeForInlineConfig(appEnv));
-            fs.writeFileSync(destinationPath, indexContent, 'utf8');
+            fs.writeFileSync(destinationPath, htmlContent, 'utf8');
         } else {
             fs.copyFileSync(file, destinationPath);
         }
