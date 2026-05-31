@@ -451,6 +451,76 @@
         emailBtn.disabled = false;
       }
     });
+
+    setupForceUpdateButton();
+  }
+
+  function setOtaStatus(message, isError = false) {
+    const node = document.getElementById("otaForceStatus");
+    if (!node) return;
+    node.textContent = message || "";
+    node.style.color = isError ? "#9c1d1d" : "#5d3414";
+  }
+
+  function describeOtaResult(res) {
+    const status = res?.status || "unknown";
+    switch (status) {
+      case "queued":
+        return {
+          msg: `Update ${res.version} installed. It will take effect on the next app restart${
+            res.heldUntil ? " (after the ritual window)" : ""
+          }.`,
+          error: false,
+        };
+      case "up-to-date":
+        return { msg: `You're already on the latest version (${res.current}). Nothing to install.`, error: false };
+      case "already-queued":
+        return { msg: `Update ${res.version} is already installed — it will take effect on the next app restart.`, error: false };
+      case "blocked-needs-new-apk":
+        return {
+          msg: `Latest bundle needs a newer app version (needs ${res.minNative}, this APK is ${res.native}). Install a new APK.`,
+          error: true,
+        };
+      case "no-manifest":
+        return { msg: "Could not reach the update server. Check your connection.", error: true };
+      case "offline":
+        return { msg: "You appear to be offline.", error: true };
+      case "download-failed":
+        return { msg: `Download failed: ${res.message || "unknown error"}.`, error: true };
+      case "next-failed":
+        return { msg: `Could not queue the update: ${res.message || "unknown error"}.`, error: true };
+      case "plugin-incomplete":
+        return { msg: "Updater is not available in this build. Install an updater-enabled APK.", error: true };
+      case "web":
+        return { msg: "Updates only run inside the installed app.", error: true };
+      default:
+        return { msg: `Update check finished (${status}).`, error: false };
+    }
+  }
+
+  function setupForceUpdateButton() {
+    const btn = document.getElementById("forceOtaUpdateBtn");
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+      const ota = window.AgnihotraOTA;
+      if (!ota?.forceCheck) {
+        setOtaStatus("Updater not loaded yet. Try again in a moment.", true);
+        return;
+      }
+      btn.disabled = true;
+      setOtaStatus("Checking for updates...");
+      window.AgnihotraInstrumentation?.recordUserAction?.("ota-force-check-clicked");
+      try {
+        const res = await ota.forceCheck();
+        const { msg, error } = describeOtaResult(res);
+        setOtaStatus(msg, error);
+      } catch (error) {
+        console.error("[AGNIHOTRA][OTA] force-check-failed", error);
+        setOtaStatus("Update check failed. Please try again.", true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
   }
 
   document.addEventListener("DOMContentLoaded", initSettingsPage);

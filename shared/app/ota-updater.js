@@ -233,7 +233,42 @@
     return soonestEnd === null ? null : new Date(soonestEnd).toISOString();
   }
 
-  async function fetchManifest() {
+  function parseManifestData(data) {
+    if (data == null) return null;
+    if (typeof data === "string") {
+      try {
+        return JSON.parse(data);
+      } catch (_) {
+        return null;
+      }
+    }
+    return typeof data === "object" ? data : null;
+  }
+
+  // Native HTTP via Capacitor core — not subject to WebView CORS, which a plain
+  // fetch() to GitHub release assets would be (they send no ACAO header).
+  // Returns: parsed manifest, null on a genuine failure, or undefined when the
+  // native HTTP plugin is unavailable (so the caller can fall back to fetch()).
+  async function fetchManifestViaNativeHttp() {
+    const http = window.Capacitor?.Plugins?.CapacitorHttp;
+    if (!http?.get) return undefined;
+    try {
+      const res = await http.get({
+        url: MANIFEST_URL,
+        headers: { Accept: "application/json" },
+        connectTimeout: CHECK_TIMEOUT_MS,
+        readTimeout: CHECK_TIMEOUT_MS,
+        disableRedirects: false,
+      });
+      const status = Number(res?.status);
+      if (!status || status < 200 || status >= 300) return null;
+      return parseManifestData(res?.data);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function fetchManifestViaFetch() {
     let controller = null;
     let timer = null;
     try {
@@ -250,13 +285,18 @@
         signal: controller.signal,
       });
       if (!res || !res.ok) return null;
-      const data = await res.json();
-      return data && typeof data === "object" ? data : null;
+      return parseManifestData(await res.json());
     } catch (_) {
-      return null; // offline / timeout / bad JSON — stay on current bundle
+      return null; // offline / timeout / CORS / bad JSON — stay on current bundle
     } finally {
       if (timer) clearTimeout(timer);
     }
+  }
+
+  async function fetchManifest() {
+    const viaNative = await fetchManifestViaNativeHttp();
+    if (viaNative !== undefined) return viaNative; // native handled it (data or null)
+    return fetchManifestViaFetch(); // web runtime fallback
   }
 
   async function getCurrentState(updater) {
@@ -272,38 +312,61 @@
     }
   }
 
+  function result(status, extra) {
+    return { status, ...(extra || {}) };
+  }
+
   /**
    * The whole flow. Anything unexpected just aborts quietly — there is no path
    * here that can block, crash, or reload the app the user is using.
+   *
+   * opts:
+   *   - trigger: string label for logs ("startup" | "resume" | "online" | "manual-force")
+   *   - force:   when true, ignore the throttle AND the Agnihotra blackout. Used
+   *              only by the manual test button. The flow stays session-safe
+   *              (download + next, never set/reload).
+   *
+   * Returns a { status, ... } object describing the outcome.
    */
-  async function checkAndDownload(trigger) {
-    if (!isNativeCapacitor()) return;
+  async function checkAndDownload(opts) {
+    const trigger = opts?.trigger || "auto";
+    const force = Boolean(opts?.force);
+
+    if (!isNativeCapacitor()) {
+      log("skip web-runtime", { trigger });
+      return result("web");
+    }
 
     const updater = getUpdaterPlugin();
     if (!updater?.download || !updater?.next || !updater?.current) {
-      log("skip plugin-incomplete");
-      return;
+      log("skip plugin-incomplete", { trigger });
+      return result("plugin-incomplete");
     }
 
     let online = true;
     try {
       online = navigator.onLine !== false;
     } catch (_) {}
-    if (!online) {
+    if (!online && !force) {
       log("skip offline", { trigger });
-      return;
+      return result("offline");
     }
 
     // Never run around sunrise/sunset — retry on the next resume/online tick.
-    if (isWithinAgnihotraBlackout()) {
+    // The force path (test button) intentionally bypasses this.
+    if (!force && isWithinAgnihotraBlackout()) {
       log("skip agnihotra-blackout", { trigger });
-      return;
+      return result("blackout");
     }
 
     const lastCheck = Number(readStorage(LAST_CHECK_KEY) || 0);
-    if (Number.isFinite(lastCheck) && Date.now() - lastCheck < MIN_CHECK_INTERVAL_MS) {
+    if (
+      !force &&
+      Number.isFinite(lastCheck) &&
+      Date.now() - lastCheck < MIN_CHECK_INTERVAL_MS
+    ) {
       log("skip throttled", { trigger });
-      return;
+      return result("throttled");
     }
 
     const state = await getCurrentState(updater);
@@ -319,7 +382,7 @@
     const manifest = await fetchManifest();
     if (!manifest || !manifest.version || !manifest.url) {
       log("no-manifest", { trigger });
-      return;
+      return result("no-manifest");
     }
     writeStorage(LAST_CHECK_KEY, String(Date.now()));
 
@@ -327,13 +390,13 @@
     const stillPending = readStorage(PENDING_VERSION_KEY);
     if (stillPending && compareVersions(manifest.version, stillPending) <= 0) {
       log("already-queued", { version: stillPending });
-      return;
+      return result("already-queued", { version: stillPending });
     }
 
     // Already on (or ahead of) the published version.
     if (compareVersions(manifest.version, state.version) <= 0) {
       log("up-to-date", { current: state.version, latest: manifest.version });
-      return;
+      return result("up-to-date", { current: state.version, latest: manifest.version });
     }
 
     // Guard: a bundle that needs a newer NATIVE shell (new plugin / permission)
@@ -344,7 +407,10 @@
         minNative: manifest.minNative,
         native: state.native,
       });
-      return;
+      return result("blocked-needs-new-apk", {
+        minNative: manifest.minNative,
+        native: state.native,
+      });
     }
 
     let bundle = null;
@@ -357,12 +423,12 @@
       });
     } catch (error) {
       log("download-failed", { message: error?.message || String(error) });
-      return;
+      return result("download-failed", { message: error?.message || String(error) });
     }
 
     if (!bundle || !bundle.id) {
       log("download-no-bundle");
-      return;
+      return result("download-failed", { message: "no bundle returned" });
     }
 
     try {
@@ -391,15 +457,31 @@
           });
         }
       }
+      return result("queued", { version: manifest.version, heldUntil: holdUntil || null });
     } catch (error) {
       log("next-failed", { message: error?.message || String(error) });
+      return result("next-failed", { message: error?.message || String(error) });
+    }
+  }
+
+  /**
+   * Manual test trigger — ignores throttle + Agnihotra blackout. Still queues
+   * via next() (no immediate reload). Returns the outcome for UI display.
+   */
+  async function forceCheck() {
+    log("force-check requested");
+    try {
+      return await checkAndDownload({ trigger: "manual-force", force: true });
+    } catch (error) {
+      log("force-check-error", { message: error?.message || String(error) });
+      return result("error", { message: error?.message || String(error) });
     }
   }
 
   function scheduleFirstCheck() {
     const kickoff = () => {
       setTimeout(() => {
-        checkAndDownload("startup").catch(() => {});
+        checkAndDownload({ trigger: "startup" }).catch(() => {});
       }, CHECK_START_DELAY_MS);
     };
     try {
@@ -418,13 +500,13 @@
       const App = window.Capacitor?.Plugins?.App;
       App?.addListener?.("appStateChange", (state) => {
         if (state && state.isActive) {
-          checkAndDownload("resume").catch(() => {});
+          checkAndDownload({ trigger: "resume" }).catch(() => {});
         }
       });
     } catch (_) {}
     try {
       window.addEventListener("online", () => {
-        checkAndDownload("online").catch(() => {});
+        checkAndDownload({ trigger: "online" }).catch(() => {});
       });
     } catch (_) {}
   }
@@ -449,6 +531,7 @@
     isNativeCapacitor,
     notifyReady,
     checkAndDownload,
+    forceCheck,
     start,
   };
   window.AgnihotraOTA = api;

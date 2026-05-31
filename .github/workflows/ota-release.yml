@@ -1,17 +1,17 @@
 name: OTA Release
 
-# Fully automated, free OTA publishing.
+# Fully automated, free OTA publishing + installable APKs.
 #
 # Trigger options:
 #   * Push a tag like v1.0.2            -> publishes that version
 #   * Run manually (workflow_dispatch)  -> publishes package.json's version
 #
 # It builds the web bundle, zips public/ (index.html at the zip root), writes
-# version.json, and uploads BOTH as assets on a GitHub Release. Because the
-# release is marked "latest", the app's
-# https://github.com/<owner>/<repo>/releases/latest/download/version.json
-# URL immediately resolves to the new bundle. Devices download it in the
-# background and apply it on the next natural app restart.
+# version.json, builds a DEBUG ("test") APK and a signed RELEASE APK, and
+# uploads ALL of them as assets on a GitHub Release marked "latest". The app's
+# https://github.com/<owner>/<repo>/releases/latest/download/version.json URL
+# then resolves to the new bundle; devices pick it up in the background and
+# apply it on the next natural restart (outside ritual windows).
 
 on:
   push:
@@ -40,6 +40,18 @@ jobs:
           node-version: "20"
           cache: "npm"
 
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses >/dev/null 2>&1 || true
+
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
@@ -54,18 +66,59 @@ jobs:
           echo "version=${V}" >> "$GITHUB_OUTPUT"
           echo "tag=v${V}" >> "$GITHUB_OUTPUT"
 
-      - name: Build + pack OTA bundle
+      - name: Build web bundle + OTA manifest
         env:
           AGNI_OTA_MIN_NATIVE: ${{ github.event.inputs.min_native }}
         run: npm run ota:pack
+
+      - name: Sync web assets into Android project
+        run: npx cap sync android
+
+      - name: Build debug + release APKs
+        run: |
+          cd android
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug assembleRelease
+
+      - name: Sign release APK with debug keystore
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          # assembleDebug creates ~/.android/debug.keystore; reuse it so the
+          # release APK is installable without committing a private keystore.
+          BT="$(ls -d "$ANDROID_SDK_ROOT"/build-tools/* | sort -V | tail -1)"
+          echo "Using build-tools: $BT"
+          mkdir -p release/ota
+          # Debug ("test") APK — already signed by gradle with the debug key.
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+            "release/ota/agnihotra-v${V}-test-debug.apk"
+          # Release APK — align + sign with the debug keystore.
+          UNSIGNED="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          "$BT/zipalign" -f -v -p 4 "$UNSIGNED" /tmp/agnihotra-aligned.apk >/dev/null
+          "$BT/apksigner" sign \
+            --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out "release/ota/agnihotra-v${V}-release.apk" \
+            /tmp/agnihotra-aligned.apk
+          "$BT/apksigner" verify --print-certs "release/ota/agnihotra-v${V}-release.apk" || true
+          ls -la release/ota
 
       - name: Publish GitHub Release (latest)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: OTA ${{ steps.ver.outputs.tag }}
-          body: "Self-hosted OTA web bundle for EternalAgni."
+          body: |
+            Self-hosted OTA web bundle for EternalAgni.
+
+            Assets:
+            - `version.json` + `dist.zip` — the OTA web bundle (auto-applied by installed apps).
+            - `agnihotra-v${{ steps.ver.outputs.version }}-test-debug.apk` — debug/test build (verbose logs).
+            - `agnihotra-v${{ steps.ver.outputs.version }}-release.apk` — release build (debug-signed, installable).
           make_latest: "true"
           files: |
             release/ota/dist.zip
             release/ota/version.json
+            release/ota/agnihotra-v${{ steps.ver.outputs.version }}-test-debug.apk
+            release/ota/agnihotra-v${{ steps.ver.outputs.version }}-release.apk
