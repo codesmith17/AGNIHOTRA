@@ -14,6 +14,9 @@ release/*.apk
 release/*.aab
 release/*.idsig
 
+# Generated OTA bundle artifacts (built by `npm run ota:pack` / CI)
+release/ota/
+
 # Signing files / secrets
 *.jks
 *.keystore

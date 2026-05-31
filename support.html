@@ -6,33 +6,41 @@
   <meta name="theme-color" content="#ff7f32">
   <title>EternalAgni Help & Support</title>
   <link rel="icon" type="image/png" sizes="192x192" href="assets/images/app-icon-192.png">
-  <link rel="stylesheet" href="https://icono-49d6.kxcdn.com/icono.min.css">
-  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.8.1/css/all.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous">
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
-<body translate="no" class="notranslate">
+<body translate="no" class="notranslate settings-page-body">
   <section class="settings-section fade-in">
-    <center>
-      <h2>Help & Support</h2>
-      <p class="section-desc">Create and send a support report to help us debug customer issues faster.</p>
-    </center>
+    <header class="settings-page-header">
+      <a href="index.html#home" class="settings-page-brand">
+        <img src="assets/images/eternalagni-icon.png" alt="" class="settings-page-logo" width="52" height="52">
+        <div class="settings-page-brand-text">
+          <p class="settings-page-eyebrow">EternalAgni</p>
+          <h2>Help &amp; Support</h2>
+        </div>
+      </a>
+      <p class="section-desc settings-page-desc">Create and send a support report to help us debug customer issues faster.</p>
+    </header>
 
     <section class="support-section-card" aria-labelledby="supportSectionTitle">
       <div class="support-section-header">
-        <h3 id="supportSectionTitle">Support Actions</h3>
-        <p>Send report with logs and diagnostics. Report data is pruned automatically (30 days retention).</p>
+        <span class="settings-card-icon settings-card-icon--support" aria-hidden="true"><i class="fa-solid fa-life-ring"></i></span>
+        <div class="settings-card-head-text">
+          <h3 id="supportSectionTitle">Support Actions</h3>
+          <p>Send report with logs and diagnostics. Report data is pruned automatically (30 days retention).</p>
+        </div>
       </div>
       <div class="support-section-actions">
-        <button type="button" id="exportSupportLogsBtn" class="settings-action-btn">Share Support Report</button>
-        <button type="button" id="emailSupportBtn" class="settings-action-btn settings-action-btn--ghost">Email Support</button>
+        <button type="button" id="exportSupportLogsBtn" class="settings-action-btn"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Share Support Report</button>
+        <button type="button" id="emailSupportBtn" class="settings-action-btn settings-action-btn--ghost"><i class="fa-solid fa-envelope" aria-hidden="true"></i> Email Support</button>
       </div>
       <p id="supportLogExportStatus" class="settings-status" aria-live="polite"></p>
     </section>
 
     <div class="settings-footer-actions">
-      <a href="settings.html" class="btn-primary">Go to Settings</a>
-      <a href="index.html#home" class="btn-primary btn-primary--soft">Back to Home</a>
+      <a href="settings.html" class="btn-primary"><i class="fa-solid fa-gear" aria-hidden="true"></i> Go to Settings</a>
+      <a href="index.html#home" class="btn-primary btn-primary--soft"><i class="fa-solid fa-house" aria-hidden="true"></i> Back to Home</a>
     </div>
   </section>
 
@@ -42,6 +50,7 @@
       appEnvironment: "__AGNI_APP_ENV__"
     };
   </script>
+  <script src="shared/app/ota-updater.js"></script>
   <script src="shared/diagnostics/instrumentation.js"></script>
   <script src="shared/diagnostics/payload-builder.js"></script>
   <script src="shared/settings/settings-page.js"></script>

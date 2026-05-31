@@ -73,6 +73,65 @@
     } catch (_) {}
   }
 
+  function logVibrate(event, meta = {}, level = "info") {
+    let serialized = "";
+    try {
+      serialized = JSON.stringify(meta ?? {});
+    } catch (_) {
+      serialized = String(meta);
+    }
+    const line = `[AGNIHOTRA][VIBRATE] ${event} ${serialized}`;
+    if (level === "error" || level === "warn") {
+      console.warn(line);
+    } else {
+      console.log(line);
+    }
+    try {
+      window.AgnihotraDiagnostics?.captureBreadcrumb?.(
+        "vibrate",
+        event,
+        meta || {},
+        level
+      );
+    } catch (_) {}
+    if (level === "error") {
+      try {
+        window.AgnihotraDiagnostics?.captureMessage?.(event, "warning", meta || {});
+      } catch (_) {}
+    }
+  }
+
+  async function verifyReminderChannelVibration(localNotifications, channelId, expected) {
+    if (!localNotifications?.listChannels) {
+      return { ok: false, reason: "listChannels-unavailable", expected };
+    }
+    try {
+      const listed = await localNotifications.listChannels();
+      const channels = listed?.channels || [];
+      const match = channels.find((ch) => ch.id === channelId);
+      if (!match) {
+        return { ok: false, reason: "channel-not-found", channelId, expected };
+      }
+      const actual = Boolean(match.vibration);
+      const ok = actual === Boolean(expected);
+      return {
+        ok,
+        reason: ok ? "channel-vibration-match" : "channel-vibration-mismatch",
+        channelId,
+        expected,
+        actual,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: "listChannels-failed",
+        channelId,
+        expected,
+        error: error?.message || String(error),
+      };
+    }
+  }
+
   function emitOsDeliveryDiagnostics(eventName, payload = {}, level = "info") {
     try {
       window.AgnihotraDiagnostics?.captureMessage?.(eventName, level, payload);
@@ -121,17 +180,38 @@
 
       logNotify("notification-posted-by-os", payload);
       emitOsDeliveryDiagnostics("notification-posted-by-os", payload, "info");
+      const vibrationEnabled = isReminderVibrationEnabled();
+      const expectedChannelId = getReminderChannelId();
       emitOsDeliveryDiagnostics(
         "sound-attempted",
         {
           ...payload,
           expectedSound: shared.CAPACITOR_NOTIFICATION_SOUND,
-          expectedChannelId: getReminderChannelId(),
-          expectedVibration: isReminderVibrationEnabled(),
+          expectedChannelId,
+          expectedVibration: vibrationEnabled,
           expectedWatchAlert: isWatchAlertEnabled(),
           note: "OS handles actual playback policy and may suppress during call/DND.",
         },
         "info"
+      );
+      const channelMatches =
+        !payload.channelId || payload.channelId === expectedChannelId;
+      const vibrationLikelyOk =
+        vibrationEnabled && channelMatches && payload.channelId;
+      logVibrate(
+        vibrationLikelyOk ? "reminder-fired-vibration-expected" : "reminder-fired-vibration-skipped",
+        {
+          notificationId: payload.notificationId,
+          tag: payload.tag,
+          channelId: payload.channelId,
+          expectedChannelId,
+          vibrationEnabled,
+          channelMatches,
+          note: vibrationEnabled
+            ? "Vibration requested on channel; OS may still mute (DND, silent mode, battery saver)."
+            : "Vibration disabled in app settings or wrong channel.",
+        },
+        vibrationLikelyOk ? "info" : "warn"
       );
       try {
         window.AgnihotraInstrumentation?.recordReminderFired?.(payload);
@@ -171,7 +251,11 @@
         console.warn("Failed to cleanup old channels:", e);
       }
 
-      console.log(`[AGNIHOTRA] ensureCapacitorChannel: creating channel ${reminderChannelId} with sound ${shared.CAPACITOR_NOTIFICATION_SOUND}`);
+      logVibrate("channel-create-start", {
+        channelId: reminderChannelId,
+        vibrationRequested: vibrationEnabled,
+        sound: shared.CAPACITOR_NOTIFICATION_SOUND,
+      });
       await localNotifications.createChannel({
         id: reminderChannelId,
         name: "Agnihotra Reminders",
@@ -181,6 +265,16 @@
         sound: shared.CAPACITOR_NOTIFICATION_SOUND,
         vibration: vibrationEnabled,
       });
+      const verify = await verifyReminderChannelVibration(
+        localNotifications,
+        reminderChannelId,
+        vibrationEnabled
+      );
+      if (verify.ok) {
+        logVibrate("channel-create-success", verify);
+      } else {
+        logVibrate("channel-create-verify-failed", verify, "warn");
+      }
       if (watchAlertEnabled) {
         await localNotifications.createChannel({
           id: shared.CAPACITOR_WEAR_CHANNEL_ID,
@@ -190,9 +284,21 @@
           visibility: 1,
           vibration: true,
         });
+        logVibrate("wear-channel-create-success", {
+          channelId: shared.CAPACITOR_WEAR_CHANNEL_ID,
+          vibrationRequested: true,
+        });
       }
-      console.log(`[AGNIHOTRA] ensureCapacitorChannel: channel created successfully`);
     } catch (error) {
+      logVibrate(
+        "channel-create-failed",
+        {
+          channelId: reminderChannelId,
+          vibrationRequested: vibrationEnabled,
+          error: error?.message || String(error),
+        },
+        "error"
+      );
       console.warn("Capacitor channel setup skipped:", error);
       window.AgnihotraDiagnostics?.captureException?.(
         error,
@@ -421,6 +527,12 @@
           includeWearNudge,
           firstTag: notifications[0]?.extra?.tag || null,
         });
+        logVibrate("schedule-upcoming", {
+          ok: true,
+          count: notifications.length,
+          channelId: reminderChannelId,
+          vibrationEnabled,
+        });
         await localNotifications.schedule({ notifications });
         window.AgnihotraInstrumentation?.recordReminderScheduled?.({
           count: notifications.length,
@@ -435,6 +547,16 @@
             : null,
         });
       } catch (error) {
+        logVibrate(
+          "schedule-upcoming-failed",
+          {
+            ok: false,
+            vibrationEnabled,
+            channelId: reminderChannelId,
+            error: error?.message || String(error),
+          },
+          "error"
+        );
         console.warn("Failed to schedule native reminders:", error);
         window.AgnihotraDiagnostics?.captureException?.(
           error,
@@ -505,6 +627,13 @@
       await localNotifications.schedule({
         notifications,
       });
+      logVibrate("schedule-test-success", {
+        ok: true,
+        tag,
+        channelId: reminderChannelId,
+        vibrationEnabled,
+        scheduleAt: scheduleAt.toISOString(),
+      });
       window.AgnihotraInstrumentation?.recordReminderScheduled?.({
         count: notifications.length,
         channelId: reminderChannelId,
@@ -515,6 +644,16 @@
       });
       return true;
     } catch (error) {
+      logVibrate(
+        "schedule-test-failed",
+        {
+          ok: false,
+          vibrationEnabled,
+          channelId: reminderChannelId,
+          error: error?.message || String(error),
+        },
+        "error"
+      );
       console.warn("Failed to schedule native test reminder:", error);
       window.AgnihotraDiagnostics?.captureException?.(
         error,

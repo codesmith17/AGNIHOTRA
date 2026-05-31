@@ -330,6 +330,61 @@ function formatDateToDDMMYYYY(date) {
   return `${day}.${month}.${year}`;
 }
 
+function getDeviceTodayTomorrowKeys(referenceDate = new Date()) {
+  const today = new Date(referenceDate);
+  const tomorrow = new Date(referenceDate);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return {
+    todayKey: formatDateToDDMMYYYY(today),
+    tomorrowKey: formatDateToDDMMYYYY(tomorrow),
+  };
+}
+
+function normalizeTimingDayResults(row, dateKey) {
+  if (!row || !dateKey) return null;
+  return {
+    date: row.date || dateKey,
+    sunrise: row.sunrise || "",
+    sunset: row.sunset || "",
+  };
+}
+
+function getCachedTodayTomorrowRows() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const cache = JSON.parse(raw);
+    const timings = cache?.timings;
+    if (!timings || typeof timings !== "object") return null;
+    const { todayKey, tomorrowKey } = getDeviceTodayTomorrowKeys();
+    const todayRow = normalizeTimingDayResults(timings[todayKey], todayKey);
+    const tomorrowRow = normalizeTimingDayResults(timings[tomorrowKey], tomorrowKey);
+    if (!todayRow?.sunrise || !todayRow?.sunset || !tomorrowRow?.sunrise || !tomorrowRow?.sunset) {
+      return null;
+    }
+    return { todayKey, tomorrowKey, todayRow, tomorrowRow };
+  } catch (_) {
+    return null;
+  }
+}
+
+function getCountdownDigitParts(targetTime, now = Date.now()) {
+  const timeDiff = Math.max(0, Number(targetTime) - now);
+  const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
+  const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
+  const hVal =
+    days > 0
+      ? `${days}d ${String(hours).padStart(2, "0")}`
+      : String(hours).padStart(2, "0");
+  return {
+    h: hVal,
+    m: String(minutes).padStart(2, "0"),
+    s: String(seconds).padStart(2, "0"),
+  };
+}
+
 const CACHE_KEY = "agnihotra_timings_cache";
 const CACHE_EXPIRY_MS = 6 * 30 * 24 * 60 * 60 * 1000; // 6 months in milliseconds
 const TRANSLATION_STORAGE_KEY = "agnihotra_language";
@@ -337,12 +392,20 @@ const DEBUG_STORAGE_KEY = "agnihotra_debug";
 const TIME_FORMAT_STORAGE_KEY = "agnihotra_time_format_v1";
 const SUPPORT_LOG_STORAGE_KEY = "agnihotra_support_logs_v1";
 const LAST_KNOWN_LOCATION_KEY = "agnihotra_last_known_location";
+/** Device GPS snapshot for "Save current place" — updated even when a saved place is active on screen. */
+const CURRENT_GPS_SNAPSHOT_KEY = "agnihotra_current_gps_snapshot_v1";
 const SUPPORT_INSTALL_ID_KEY = "agnihotra_support_install_id_v1";
 const SUPPORT_SESSION_ID_KEY = "agnihotra_support_session_id_v1";
 const EXPORT_FILE_REGISTRY_KEY = "agnihotra_export_file_registry_v1";
 const EXPORT_NOTIFICATION_CHANNEL_ID = "agnihotra-export-headsup-v5";
 const EXPORT_NATIVE_DIRECTORY = "DATA";
+// Distance the user must move before we refresh the displayed address. Small
+// moves keep the cached name; a real move past this distance re-geocodes.
 const LOCATION_NAME_REFRESH_DISTANCE_KM = 3;
+// How long a cached fix is considered "fresh" enough to PAINT instantly on launch
+// (for perceived speed). GPS still verifies in the background and corrects the
+// address if the user has actually moved past the 100 m threshold above.
+const LOCATION_CACHE_FRESH_MS = 30 * 60 * 1000;
 const REQUIRE_MANDATORY_LOCATION_PERMISSION = true;
 const REQUIRE_MANDATORY_NOTIFICATION_PERMISSION = true;
 const LOCATION_PERMISSION_MAX_RETRIES = 3;
@@ -836,8 +899,21 @@ async function continueAppInitialization() {
     console.warn("[AGNIHOTRA][BELL] preload-init-failed", err?.message)
   );
   setupAndroidBackButton();
-  getLocation();
+  if (isManualSavedPlaceActive()) {
+    const place = getActiveSavedPlace();
+    if (place) {
+      applySavedPlaceTimings(place);
+    } else {
+      activateGpsLocationMode();
+    }
+  } else {
+    getLocation();
+  }
   updateOnlineStatus();
+  syncCurrentGpsSnapshotInBackground();
+  if (isEffectivelyOnline()) {
+    scheduleAddressEnrichment(2500);
+  }
   loadTranslations().then(() => {
     applyTranslations();
     refreshUpcomingEvents();
@@ -935,6 +1011,266 @@ function getLastKnownLocation() {
   }
 }
 
+function saveCurrentGpsSnapshot(lat, lng, locationName = null, locationDetail = null) {
+  try {
+    const existing = getCurrentGpsSnapshot();
+    localStorage.setItem(
+      CURRENT_GPS_SNAPSHOT_KEY,
+      JSON.stringify({
+        lat,
+        lng,
+        locationName,
+        locationDetail: locationDetail ?? existing?.locationDetail ?? null,
+        savedAt: Date.now(),
+      })
+    );
+  } catch (_) {}
+}
+
+function getCurrentGpsSnapshot() {
+  try {
+    const raw = localStorage.getItem(CURRENT_GPS_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.lat !== "number" || typeof parsed?.lng !== "number") {
+      return null;
+    }
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Where the phone is now — for saving a new place, not the active saved-place display. */
+function getLocationForSavePlace() {
+  const snap = getCurrentGpsSnapshot();
+  if (snap?.lat != null && snap?.lng != null) return snap;
+  return getLastKnownLocation();
+}
+
+let currentGpsSyncInFlight = false;
+
+/**
+ * Track real device location in the background while Home/Office is shown on screen.
+ * Does not change timings hero UI or active saved-place selection.
+ */
+async function syncCurrentGpsSnapshotInBackground() {
+  if (!navigator.geolocation || currentGpsSyncInFlight) return;
+  currentGpsSyncInFlight = true;
+  const startedAt = performance.now();
+
+  try {
+    locationLog("current-gps-sync-start", {
+      savedPlaceActive: isManualSavedPlaceActive(),
+    });
+
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 60000,
+      });
+    });
+
+    const latitude = position.coords.latitude;
+    const longitude = position.coords.longitude;
+    const prior = getCurrentGpsSnapshot();
+    const distKm = prior?.lat
+      ? haversineDistanceKm(latitude, longitude, prior.lat, prior.lng)
+      : Infinity;
+    const moved = distKm > LOCATION_NAME_REFRESH_DISTANCE_KM;
+
+    let locationName = prior?.locationName || null;
+    let locationDetail = prior?.locationDetail || null;
+
+    const needsName =
+      !locationName ||
+      locationNeedsAddressEnrichment(locationName, locationDetail) ||
+      moved;
+
+    if (needsName && isEffectivelyOnline()) {
+      const addr = await fetchReverseGeocodeAddress(latitude, longitude);
+      if (addr?.primary) {
+        locationName = addr.primary;
+        locationDetail = addr.detail;
+      }
+    }
+
+    if (!locationName) {
+      locationName = "GPS location detected";
+      locationDetail =
+        locationDetail ||
+        `${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)}`;
+    }
+
+    saveCurrentGpsSnapshot(latitude, longitude, locationName, locationDetail);
+    locationLog("current-gps-sync-done", {
+      lat: latitude,
+      lng: longitude,
+      hasName: Boolean(locationName && !/^gps location detected$/i.test(locationName)),
+      movedKm: Number(distKm.toFixed(3)),
+      elapsedMs: Math.round(performance.now() - startedAt),
+    });
+    debugLog("current-gps-sync-done", {
+      distKm: Number(distKm.toFixed(3)),
+      elapsedMs: Math.round(performance.now() - startedAt),
+    });
+  } catch (error) {
+    locationLog("current-gps-sync-failed", {
+      code: error?.code,
+      message: error?.message || String(error),
+      elapsedMs: Math.round(performance.now() - startedAt),
+    });
+    debugLog("current-gps-sync-failed", { message: error?.message || String(error) });
+  } finally {
+    currentGpsSyncInFlight = false;
+  }
+}
+
+function getActiveSavedPlace() {
+  return window.AgnihotraSavedPlaces?.getActivePlace?.() || null;
+}
+
+function isManualSavedPlaceActive() {
+  return Boolean(window.AgnihotraSavedPlaces?.isManualPlaceActive?.());
+}
+
+let activePlaceSwitchSeq = 0;
+
+function beginPlaceSwitch() {
+  activePlaceSwitchSeq += 1;
+  return activePlaceSwitchSeq;
+}
+
+function isPlaceSwitchCurrent(seq) {
+  return seq === activePlaceSwitchSeq;
+}
+
+function setLocationCardUpdating(isUpdating) {
+  const userLocationNode = document.getElementById("userLocation");
+  if (!userLocationNode) return;
+  userLocationNode.classList.toggle("location-card--updating", Boolean(isUpdating));
+}
+
+function renderSavedPlaceLocationCard(place) {
+  const userLocationNode = document.getElementById("userLocation");
+  if (!place || !userLocationNode) return;
+
+  const iconMeta =
+    window.AgnihotraSavedPlaces?.getPlaceIconMeta?.(place.label) || {
+      iconStyle: "fa-solid",
+      icon: "fa-location-dot",
+      toneClass: "place-icon--custom",
+    };
+  const iconHtml =
+    window.AgnihotraSavedPlaces?.renderPlaceIconHtml?.(iconMeta) ||
+    '<i class="fa-solid fa-location-dot" aria-hidden="true"></i>';
+  const address =
+    window.AgnihotraSavedPlaces?.formatPlaceAddressCard?.(place) || {
+      labelText: place.label,
+      primary: place.locationName || place.label,
+      secondary: place.locationDetail || "",
+    };
+  const cardLabel = interpolateTemplate(
+    t("places.cardLabel", "Place: {{name}}"),
+    { name: address.labelText }
+  );
+  const detailParts = String(address.secondary || "")
+    .split(" • ")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  userLocationNode.innerHTML = `
+    <div class="location-saved-row">
+      <span class="location-place-icon ${iconMeta.toneClass}" aria-hidden="true">${iconHtml}</span>
+      <div class="location-saved-body">
+        <span class="location-card-label">${escapeLocationHtml(cardLabel)}</span>
+        <span class="location-card-primary">${escapeLocationHtml(address.primary)}</span>
+        ${
+          detailParts.length
+            ? `<span class="location-card-details">${escapeLocationHtml(detailParts.join(" • "))}</span>`
+            : ""
+        }
+      </div>
+    </div>
+  `;
+  updateLocationPlaceTriggerUI();
+}
+
+async function applySavedPlaceTimings(place) {
+  if (!place?.lat || !place?.lng) return;
+  const seq = beginPlaceSwitch();
+  renderSavedPlaceLocationCard(place);
+  setLocationLoading(false);
+  updateLocationPlaceTriggerUI();
+
+  const hasCachedTimings = Boolean(
+    getValidCachedData(place.lat, place.lng)?.timings
+  );
+  setLocationCardUpdating(!hasCachedTimings);
+  if (!hasCachedTimings) setScheduleLoading(true);
+
+  locationLog("saved-place-active", { id: place.id, label: place.label });
+  debugLog("saved-place:active", { id: place.id, label: place.label });
+
+  try {
+    await getSunriseSunset(place.lat, place.lng, place.locationName || place.label);
+    if (!isPlaceSwitchCurrent(seq)) return;
+    refreshUpcomingEvents();
+  } finally {
+    if (isPlaceSwitchCurrent(seq)) {
+      setLocationCardUpdating(false);
+      setScheduleLoading(false);
+    }
+  }
+}
+
+async function activateGpsLocationMode() {
+  const seq = beginPlaceSwitch();
+  window.AgnihotraSavedPlaces?.setActivePlaceId?.(
+    window.AgnihotraSavedPlaces?.AUTO_ID || "auto"
+  );
+  updateLocationPlaceTriggerUI();
+
+  const lastKnown = getLastKnownLocation();
+  if (hasUsableLocationCache(lastKnown)) {
+    paintCachedGpsLocation(lastKnown);
+    const hasCachedTimings = Boolean(
+      getValidCachedData(lastKnown.lat, lastKnown.lng)?.timings
+    );
+    if (hasCachedTimings) {
+      await getSunriseSunset(
+        lastKnown.lat,
+        lastKnown.lng,
+        lastKnown.locationName
+      );
+      if (!isPlaceSwitchCurrent(seq)) return;
+      refreshUpcomingEvents();
+    }
+  }
+
+  if (!isPlaceSwitchCurrent(seq)) return;
+  await getLocation();
+}
+
+function updateLocationPlaceTriggerUI() {
+  window.AgnihotraSavedPlaces?.updateLocationPlaceTriggerUI?.(t);
+}
+
+function setupSavedPlacesPicker() {
+  window.AgnihotraSavedPlaces?.setupPlacePickerUI?.({
+    t,
+    getLastKnownLocation: getLocationForSavePlace,
+    onPlacePickerOpen: () => {
+      syncCurrentGpsSnapshotInBackground();
+    },
+    onSelectPlace: applySavedPlaceTimings,
+    onSelectAuto: activateGpsLocationMode,
+    onPlacesChanged: updateLocationPlaceTriggerUI,
+  });
+  updateLocationPlaceTriggerUI();
+}
+
 function haversineDistanceKm(lat1, lng1, lat2, lng2) {
   const toRad = (deg) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
@@ -1023,9 +1359,11 @@ function retryPreciseLocationInBackground(reason = "unknown") {
         elapsedMs: Math.round(performance.now() - startedAt)
       });
 
-      document.getElementById("userLocation").innerText =
-        "Your Location: Detecting nearby place...";
-      saveLastKnownLocation(latitude, longitude);
+      const prior = getLastKnownLocation();
+      if (!paintCachedGpsLocation(prior)) {
+        setLocationLoading(true);
+      }
+      saveLastKnownLocation(latitude, longitude, prior?.locationName || null, prior?.locationDetail || null);
 
       const timingsPromise = getSunriseSunset(latitude, longitude);
       await reverseGeocode(latitude, longitude, true);
@@ -1415,9 +1753,13 @@ function applyTranslations() {
   document.documentElement.lang = currentLanguage;
   document.querySelectorAll("[data-i18n]").forEach((element) => {
     const key = element.getAttribute("data-i18n");
-    const translated = t(key, element.textContent.trim());
+    const textTarget =
+      element.matches("a[data-i18n]") && element.querySelector(".nav-link-text")
+        ? element.querySelector(".nav-link-text")
+        : element;
+    const translated = t(key, textTarget.textContent.trim());
     if (translated) {
-      element.textContent = translated;
+      textTarget.textContent = translated;
     }
   });
   const locationLoadingText = document.getElementById("locationLoadingText");
@@ -1432,6 +1774,8 @@ function applyTranslations() {
   if (toggleButton) {
     toggleButton.textContent = getLanguageDisplayName(currentLanguage);
   }
+
+  syncNavLangDropdownUI();
 
   document.querySelectorAll(".lang-option").forEach((btn) => {
     btn.classList.toggle("active", btn.getAttribute("data-lang") === currentLanguage);
@@ -1456,6 +1800,69 @@ async function syncNativeWidgetLanguage() {
   }
 }
 
+function syncNavLangDropdownUI() {
+  const triggerLabel = document.getElementById("navLangTriggerLabel");
+  const menu = document.getElementById("navLangMenu");
+  if (triggerLabel) {
+    triggerLabel.textContent = getLanguageDisplayName(currentLanguage);
+  }
+  menu?.querySelectorAll(".nav-lang-option").forEach((btn) => {
+    const lang = btn.getAttribute("data-lang");
+    btn.classList.toggle("is-active", lang === currentLanguage);
+    btn.setAttribute("aria-selected", lang === currentLanguage ? "true" : "false");
+  });
+}
+
+function setupNavLangDropdown(setLanguage) {
+  const trigger = document.getElementById("navLangTrigger");
+  const menu = document.getElementById("navLangMenu");
+  const customRoot = document.getElementById("navLangCustom");
+  if (!trigger || !menu || !customRoot) return;
+
+  const closeMenu = () => {
+    menu.classList.add("hidden");
+    trigger.setAttribute("aria-expanded", "false");
+    customRoot.classList.remove("is-open");
+  };
+
+  const openMenu = () => {
+    menu.classList.remove("hidden");
+    trigger.setAttribute("aria-expanded", "true");
+    customRoot.classList.add("is-open");
+  };
+
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (menu.classList.contains("hidden")) openMenu();
+    else closeMenu();
+  });
+
+  menu.querySelectorAll(".nav-lang-option").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const lang = btn.getAttribute("data-lang");
+      if (lang) setLanguage(lang);
+      closeMenu();
+    });
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!customRoot.contains(e.target)) closeMenu();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !menu.classList.contains("hidden")) closeMenu();
+  });
+
+  const closeOnPortrait = () => {
+    if (window.matchMedia("(orientation: portrait)").matches) closeMenu();
+  };
+  window.addEventListener("orientationchange", closeOnPortrait);
+  window.matchMedia("(orientation: portrait)").addEventListener?.("change", closeOnPortrait);
+
+  syncNavLangDropdownUI();
+}
+
 function setupLanguageToggle() {
   const toggleButton = document.getElementById("languageToggle");
   const langButtons = document.querySelectorAll(".lang-option");
@@ -1469,6 +1876,7 @@ function setupLanguageToggle() {
     applyTranslations();
     refreshUpcomingEvents();
     scheduleNativeRemindersFromTimings(latestTimingsForNativeReminders);
+    syncNavLangDropdownUI();
   };
 
   if (toggleButton) {
@@ -1476,6 +1884,8 @@ function setupLanguageToggle() {
       setLanguage(getNextLanguage(currentLanguage));
     });
   }
+
+  setupNavLangDropdown(setLanguage);
 
   langButtons.forEach((button) => {
     button.addEventListener("click", () => {
@@ -1737,24 +2147,34 @@ function refreshUpcomingEvents() {
   const todayTimes = document.getElementById("todayTimes");
   const tomorrowTimes = document.getElementById("tomorrowTimes");
   if (!todayTimes || !tomorrowTimes) return;
-  const todayHeader = todayTimes.querySelector(".card-date-header");
-  const tomorrowHeader = tomorrowTimes.querySelector(".card-date-header");
-  if (!todayHeader || !tomorrowHeader) return;
 
-  const todayData = {
-    date: todayHeader.innerText,
-    sunrise: todayTimes.querySelectorAll(".time-value")[0]?.innerText || "",
-    sunset: todayTimes.querySelectorAll(".time-value")[1]?.innerText || "",
-  };
-  const tomorrowData = {
-    date: tomorrowHeader.innerText,
-    sunrise: tomorrowTimes.querySelectorAll(".time-value")[0]?.innerText || "",
-    sunset: tomorrowTimes.querySelectorAll(".time-value")[1]?.innerText || "",
-  };
-  if (todayData.date && tomorrowData.date) {
+  const cached = getCachedTodayTomorrowRows();
+  if (!cached) {
+    const { todayKey, tomorrowKey } = getDeviceTodayTomorrowKeys();
+    console.log(
+      "[AGNIHOTRA][COUNTDOWN] refresh-cache-miss-triggering-reload",
+      { todayDateKey: todayKey, tomorrowDateKey: tomorrowKey, hasToday: false, hasTomorrow: false }
+    );
+    if (typeof loadTimings === "function") {
+      try { loadTimings(); } catch (_) {}
+    }
+    return;
+  }
+
+  const todayData = cached.todayRow;
+  const tomorrowData = cached.tomorrowRow;
+
+  // Repaint the two date-cards too so their headers no longer show a stale
+  // date after midnight rollover.
+  if (typeof displaySunriseSunset === "function") {
+    try {
+      displaySunriseSunset(todayData, "todayTimes");
+      displaySunriseSunset(tomorrowData, "tomorrowTimes");
+    } catch (_) {}
+  }
+
     displayUpcomingTimings(todayData, tomorrowData, "upcomingTimes");
   }
-}
 
 let upcomingRefreshTimeoutId = null;
 function requestUpcomingEventsRefresh(reason = "countdown-elapsed") {
@@ -1923,8 +2343,14 @@ async function getSunriseSunset(lat, lng, locationName = null) {
         lng,
         locationName: cache.locationName || locationName || null,
       };
-      const todayData = cache.timings[todayFormatted];
-      const tomorrowData = cache.timings[tomorrowFormatted];
+      const todayData = normalizeTimingDayResults(
+        cache.timings[todayFormatted],
+        todayFormatted
+      );
+      const tomorrowData = normalizeTimingDayResults(
+        cache.timings[tomorrowFormatted],
+        tomorrowFormatted
+      );
 
       if (todayData) displaySunriseSunset(todayData, "todayTimes");
       if (tomorrowData) displaySunriseSunset(tomorrowData, "tomorrowTimes");
@@ -3582,84 +4008,94 @@ function setupSettingsPanel() {
 }
 
 function buildUpcomingEvents(todayResults, tomorrowResults, currentTime = Date.now()) {
-  // Parse the date format DD.MM.YYYY and time format HH:MM:SS
-  const todaySunriseTime = parseDateTime(
-    todayResults.date,
-    todayResults.sunrise
-  );
-  const todaySunsetTime = parseDateTime(todayResults.date, todayResults.sunset);
-  const tomorrowSunriseTime = parseDateTime(
-    tomorrowResults.date,
-    tomorrowResults.sunrise
-  );
-  const tomorrowSunsetTime = parseDateTime(
-    tomorrowResults.date,
-    tomorrowResults.sunset
-  );
-
-  // Find the next upcoming event(s) based on current time
-  const upcomingEvents = [];
-
-  // Check what's coming next - always show the next 2 upcoming events
-  if (currentTime < todaySunriseTime) {
-    // Before today's sunrise - show today's sunrise and sunset
-    upcomingEvents.push({
-      id: "todayssunrise",
-      label: t("events.todaysSunrise", "Today's Sunrise"),
-      time: todaySunriseTime,
-      isSunrise: true
-    });
-    upcomingEvents.push({
-      id: "todayssunset",
-      label: t("events.todaysSunset", "Today's Sunset"),
-      time: todaySunsetTime,
-      isSunrise: false
-    });
-  } else if (currentTime < todaySunsetTime) {
-    // After today's sunrise but before today's sunset - show today's sunset and tomorrow's sunrise
-    upcomingEvents.push({
-      id: "todayssunset",
-      label: t("events.todaysSunset", "Today's Sunset"),
-      time: todaySunsetTime,
-      isSunrise: false
-    });
-    upcomingEvents.push({
-      id: "tomorrowssunrise",
-      label: t("events.tomorrowsSunrise", "Tomorrow's Sunrise"),
-      time: tomorrowSunriseTime,
-      isSunrise: true
-    });
-  } else {
-    // After today's sunset - show tomorrow's sunrise and sunset
-    upcomingEvents.push({
-      id: "tomorrowssunrise",
-      label: t("events.tomorrowsSunrise", "Tomorrow's Sunrise"),
-      time: tomorrowSunriseTime,
-      isSunrise: true
-    });
-    upcomingEvents.push({
-      id: "tomorrowssunset",
-      label: t("events.tomorrowsSunset", "Tomorrow's Sunset"),
-      time: tomorrowSunsetTime,
-      isSunrise: false
-    });
+  const { todayKey, tomorrowKey } = getDeviceTodayTomorrowKeys();
+  const today = normalizeTimingDayResults(todayResults, todayKey);
+  const tomorrow = normalizeTimingDayResults(tomorrowResults, tomorrowKey);
+  if (!today?.sunrise || !today?.sunset || !tomorrow?.sunrise || !tomorrow?.sunset) {
+    return [];
   }
 
-  return upcomingEvents;
+  const candidates = [
+    {
+      id: "todayssunrise",
+      label: t("events.todaysSunrise", "Today's Sunrise"),
+      time: parseDateTime(today.date, today.sunrise),
+      isSunrise: true,
+    },
+    {
+      id: "todayssunset",
+      label: t("events.todaysSunset", "Today's Sunset"),
+      time: parseDateTime(today.date, today.sunset),
+      isSunrise: false,
+    },
+    {
+      id: "tomorrowssunrise",
+      label: t("events.tomorrowsSunrise", "Tomorrow's Sunrise"),
+      time: parseDateTime(tomorrow.date, tomorrow.sunrise),
+      isSunrise: true,
+    },
+    {
+      id: "tomorrowssunset",
+      label: t("events.tomorrowsSunset", "Tomorrow's Sunset"),
+      time: parseDateTime(tomorrow.date, tomorrow.sunset),
+      isSunrise: false,
+    },
+  ].filter((event) => Number.isFinite(event.time));
+
+  const futureEvents = candidates
+    .filter((event) => event.time > currentTime)
+    .sort((a, b) => a.time - b.time);
+
+  if (futureEvents.length >= 2) return futureEvents.slice(0, 2);
+  if (futureEvents.length === 1) {
+    const nextAfter = candidates
+      .filter((event) => event.time > futureEvents[0].time)
+      .sort((a, b) => a.time - b.time)[0];
+    return nextAfter ? [futureEvents[0], nextAfter] : [futureEvents[0]];
+  }
+
+  return candidates.slice(-2);
 }
 
 function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
   const element = document.getElementById(elementId);
   const countdownElement = document.getElementById("upcomingCountdown");
-  const upcomingEvents = buildUpcomingEvents(todayResults, tomorrowResults);
+  if (!element || !countdownElement) return;
+
+  const { todayKey, tomorrowKey } = getDeviceTodayTomorrowKeys();
+  let todayRow = normalizeTimingDayResults(todayResults, todayKey);
+  let tomorrowRow = normalizeTimingDayResults(tomorrowResults, tomorrowKey);
+  let upcomingEvents = buildUpcomingEvents(todayRow, tomorrowRow);
+  let nextEvent = upcomingEvents[0];
+
+  if (!nextEvent || !Number.isFinite(nextEvent.time) || nextEvent.time <= Date.now()) {
+    const cached = getCachedTodayTomorrowRows();
+    if (cached) {
+      todayRow = cached.todayRow;
+      tomorrowRow = cached.tomorrowRow;
+      upcomingEvents = buildUpcomingEvents(todayRow, tomorrowRow);
+      nextEvent = upcomingEvents[0];
+    }
+  }
+
+  if (!nextEvent || !Number.isFinite(nextEvent.time) || nextEvent.time <= Date.now()) {
+    console.log("[AGNIHOTRA][COUNTDOWN] no-future-event-triggering-reload", {
+      nextTime: nextEvent?.time || null,
+      now: Date.now(),
+    });
+    requestUpcomingEventsRefresh("countdown-no-future-event");
+    if (typeof loadTimings === "function") {
+      try { loadTimings(); } catch (_) {}
+    }
+    if (!upcomingEvents.length) return;
+  }
 
   // Clear previous content and countdowns
   element.innerHTML = "";
-  if (countdownElement) countdownElement.innerHTML = "";
-  window.activeCountdowns = {}; // Clear all active countdowns
+  countdownElement.innerHTML = "";
+  window.activeCountdowns = {};
   window.countdownLabels = {};
 
-  const nextEvent = upcomingEvents[0];
   if (nextEvent && countdownElement) {
     displayCountdownAndTime(
       countdownElement,
@@ -3692,32 +4128,11 @@ function refreshUpcomingTimeOnlyCardsFromCache(reason = "time-window-open") {
   try {
     const element = document.getElementById("upcomingTimes");
     if (!element) return false;
-    const cacheRaw = localStorage.getItem(CACHE_KEY);
-    if (!cacheRaw) return false;
-    const cache = JSON.parse(cacheRaw);
-    const timings = cache?.timings;
-    if (!timings || typeof timings !== "object") return false;
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
-    const todayKey = formatDateToDDMMYYYY(today);
-    const tomorrowKey = formatDateToDDMMYYYY(tomorrow);
-    const todayRow = timings[todayKey];
-    const tomorrowRow = timings[tomorrowKey];
-    if (!todayRow?.sunrise || !todayRow?.sunset || !tomorrowRow?.sunrise || !tomorrowRow?.sunset) {
-      return false;
-    }
+    const cached = getCachedTodayTomorrowRows();
+    if (!cached) return false;
     const upcomingEvents = buildUpcomingEvents(
-      {
-        date: todayKey,
-        sunrise: todayRow.sunrise,
-        sunset: todayRow.sunset,
-      },
-      {
-        date: tomorrowKey,
-        sunrise: tomorrowRow.sunrise,
-        sunset: tomorrowRow.sunset,
-      },
+      cached.todayRow,
+      cached.tomorrowRow,
       Date.now()
     );
     element.innerHTML = "";
@@ -3778,6 +4193,8 @@ async function syncNativeHomescreenWidget(nextEvent) {
 
 // Helper function to parse date and time into timestamp
 function parseDateTime(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return NaN;
+
   // Handle both DD.MM.YYYY and YYYY-MM-DD formats
   let day, month, year;
 
@@ -3789,7 +4206,7 @@ function parseDateTime(dateStr, timeStr) {
     [year, month, day] = dateStr.split("-").map(Number);
   } else {
     console.error("Unknown date format:", dateStr);
-    return Date.now(); // Return current time if parsing fails
+    return NaN;
   }
 
   // Parse time string - handle both "HH:MM:SS" and "H:MM:SS AM/PM" formats
@@ -3840,13 +4257,13 @@ function parseDateTime(dateStr, timeStr) {
       minutes,
       seconds,
     });
-    return Date.now(); // Return current time if parsing fails
+    return NaN;
   }
 
   // Create date object (month is 0-indexed in JavaScript)
   const date = new Date(year, month - 1, day, hours, minutes, seconds);
-
-  return date.getTime();
+  const ts = date.getTime();
+  return Number.isFinite(ts) ? ts : NaN;
 }
 
 // Global object to store countdown data
@@ -3934,11 +4351,22 @@ function setupScreenWakeLock() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       requestScreenWakeLock();
+      // The user just brought the app back to the foreground. If the clock
+      // crossed midnight while we were backgrounded, the cached today/tomorrow
+      // labels are now stale. Force an upcoming-events refresh so labels and
+      // countdown digits recompute against the current device date.
+      requestUpcomingEventsRefresh("visibility-visible");
     }
   });
 
-  window.addEventListener('focus', () => requestScreenWakeLock());
-  window.addEventListener('pageshow', () => requestScreenWakeLock());
+  window.addEventListener('focus', () => {
+    requestScreenWakeLock();
+    requestUpcomingEventsRefresh("window-focus");
+  });
+  window.addEventListener('pageshow', () => {
+    requestScreenWakeLock();
+    requestUpcomingEventsRefresh("page-show");
+  });
 
   ["click", "touchstart", "mousedown", "keydown"].forEach((eventName) => {
     window.addEventListener(eventName, () => requestScreenWakeLock());
@@ -3963,11 +4391,12 @@ function displayCountdownAndTime(element, id, label, time, isSunrise, isNext = f
   const atText = interpolateTemplate(atTemplate, {
     time: formatDateTimeToTimeOnly(time),
   });
+  const digits = getCountdownDigitParts(time);
 
   itemDiv.innerHTML = `
         <span class="fire-countdown-bg" aria-hidden="true"></span>
         <span class="time-label"><i class="${iconClass}" style="color: ${iconColor};"></i> ${label.toUpperCase()}</span>
-        <span id="${uniqueId}Countdown" class="countdown-value"><span class="cd-h">--</span>h <span class="cd-m">--</span>m <span class="cd-s">--</span>s</span>
+        <span id="${uniqueId}Countdown" class="countdown-value"><span class="cd-h">${digits.h}</span>h <span class="cd-m">${digits.m}</span>m <span class="cd-s">${digits.s}</span>s</span>
         <span class="time-secondary">${atText}</span>
     `;
 
@@ -4208,7 +4637,9 @@ function updateCountdown(type, targetTime) {
     countdownElement.innerHTML = `<span class="cd-passed">${t("countdown.justPassed", "Agnihotra moment complete")}</span>`;
   } else {
     setCountdownFireState(countdownElement, false);
-    // 7-second grace expired — rotate to the next upcoming slots
+    // Grace expired — drop this countdown so we don't refresh every tick.
+    delete window.activeCountdowns[type];
+    delete window.countdownLabels?.[type];
     requestUpcomingEventsRefresh("event-window-passed");
   }
 }
@@ -4247,6 +4678,43 @@ function uniqueLocationParts(parts) {
     });
 }
 
+function hasUsableLocationCache(lastKnown) {
+  return (
+    lastKnown &&
+    Number.isFinite(lastKnown.lat) &&
+    Number.isFinite(lastKnown.lng)
+  );
+}
+
+function isLocationCacheFresh(lastKnown) {
+  const savedAt = Number(lastKnown?.savedAt) || 0;
+  return savedAt > 0 && Date.now() - savedAt < LOCATION_CACHE_FRESH_MS;
+}
+
+/** Paint best-known GPS address immediately; never swap to a "detecting" placeholder. */
+function paintCachedGpsLocation(lastKnown) {
+  if (!hasUsableLocationCache(lastKnown)) return false;
+
+  const cachedName = String(lastKnown.locationName || "").trim();
+  const cachedDetail = lastKnown.locationDetail || null;
+  if (cachedName) {
+    renderLocationCard({
+      label: "Detected Address:",
+      primary: cachedName,
+      secondary: cachedDetail,
+    });
+  } else {
+    const coordDetail = `${Number(lastKnown.lat).toFixed(5)}, ${Number(lastKnown.lng).toFixed(5)}`;
+    renderLocationCard({
+      label: "Your Location:",
+      primary: "GPS location detected",
+      secondary: coordDetail,
+    });
+  }
+  setLocationLoading(false);
+  return true;
+}
+
 function renderLocationCard({ label = "", primary = "", secondary = "" } = {}) {
   const userLocationNode = document.getElementById("userLocation");
   if (!userLocationNode) return;
@@ -4263,6 +4731,7 @@ function renderLocationCard({ label = "", primary = "", secondary = "" } = {}) {
         : ""
     }
   `;
+  updateLocationPlaceTriggerUI();
 }
 
 function buildDetailedAddress(data, latitude, longitude) {
@@ -4323,36 +4792,56 @@ function buildDetailedAddress(data, latitude, longitude) {
 
 async function getLocation() {
   const startedAt = performance.now();
+  const locationRequestSeq = activePlaceSwitchSeq;
   debugLog("location:start");
   locationLog("request-start");
 
-  // ── STEP 1: Show cached data IMMEDIATELY — no spinner if we have a cached location ──
-  const lastKnown = getLastKnownLocation();
-  if (lastKnown?.lat && lastKnown?.lng) {
-    const cachedName = lastKnown.locationName || null;
-    const cachedDetail = lastKnown.locationDetail || null;
-    if (cachedName) {
-      renderLocationCard({
-        label: "Detected Address:",
-        primary: cachedName,
-        secondary: cachedDetail,
-      });
-    } else {
-      document.getElementById("userLocation").innerText = "Detecting nearby place...";
+  // Manual saved place — fixed coords, no GPS.
+  if (isManualSavedPlaceActive()) {
+    const place = getActiveSavedPlace();
+    if (place) {
+      await applySavedPlaceTimings(place);
+      syncCurrentGpsSnapshotInBackground();
+      return;
     }
-    // Hide spinner immediately — GPS verify runs silently in background
-    setLocationLoading(false);
-    debugLog("location:cache-bootstrap", { lat: lastKnown.lat, lng: lastKnown.lng, cachedName });
-    locationLog("cache-bootstrap", { lat: lastKnown.lat, lng: lastKnown.lng, hasName: Boolean(cachedName) });
-    getSunriseSunset(lastKnown.lat, lastKnown.lng, cachedName);
+    window.AgnihotraSavedPlaces?.setActivePlaceId?.(
+      window.AgnihotraSavedPlaces?.AUTO_ID || "auto"
+    );
+  }
+
+  const lastKnown = getLastKnownLocation();
+  // Coordinates ARE the cache. If we have them, show instantly — never "detecting".
+  const cacheHit = hasUsableLocationCache(lastKnown);
+
+  if (cacheHit) {
+    // ── CACHE HIT: show stored address (or coords) instantly. No spinner ever. ──
+    paintCachedGpsLocation(lastKnown);
+    getSunriseSunset(lastKnown.lat, lastKnown.lng, lastKnown.locationName || null);
+    locationLog("cache-hit", {
+      fresh: isLocationCacheFresh(lastKnown),
+      hasName: Boolean(lastKnown.locationName),
+    });
+
+    // Fresh AND already named → trust fully, skip GPS entirely.
+    if (isLocationCacheFresh(lastKnown) && lastKnown.locationName) {
+      debugLog("location:cache-hit-fresh");
+      return;
+    }
+    // Otherwise (stale, or missing the address name) verify/upgrade SILENTLY below —
+    // the address/coords stay on screen and we never show the loading spinner.
   } else {
-    // No cache at all — show spinner so user knows we're working
+    // ── CACHE MISS: no coordinates at all. Show detecting; no stale data. ──
     setLocationLoading(true);
+    locationLog("cache-miss-detecting", {});
   }
 
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
+        if (!isPlaceSwitchCurrent(locationRequestSeq) || isManualSavedPlaceActive()) {
+          setLocationLoading(false);
+          return;
+        }
         const latitude = position.coords.latitude;
         const longitude = position.coords.longitude;
         debugLog("location:geolocation-success", {
@@ -4366,9 +4855,10 @@ async function getLocation() {
           elapsedMs: Math.round(performance.now() - startedAt)
         });
 
-        // ── STEP 2: 3 km distance check vs cached position ─────────────────
-        // If user has barely moved, keep showing the cached name and timings (no re-geocode).
-        // Only spend network + time on a full refresh when they have meaningfully moved.
+        // ── STEP 2: distance check vs cached position ──────────────────────
+        // If user has barely moved, keep showing the cached name and timings (no
+        // re-geocode). Only spend network + time on a full refresh once they have
+        // moved past LOCATION_NAME_REFRESH_DISTANCE_KM.
         const distFromCache = lastKnown?.lat
           ? haversineDistanceKm(latitude, longitude, lastKnown.lat, lastKnown.lng)
           : Infinity;
@@ -4384,23 +4874,36 @@ async function getLocation() {
           locationChanged
         });
 
-        if (!locationChanged && lastKnown?.locationName) {
-          // Still at same place — just silently update coords in storage,
-          // keep showing the cached name and timings (already on screen from Step 1).
-          saveLastKnownLocation(latitude, longitude, lastKnown.locationName, lastKnown.locationDetail || null);
+        if (!locationChanged) {
+          // Same area — keep cached address on screen; only refresh coords in storage.
+          saveLastKnownLocation(
+            latitude,
+            longitude,
+            lastKnown?.locationName || null,
+            lastKnown?.locationDetail || null
+          );
           setLocationLoading(false);
+          if (!lastKnown?.locationName) {
+            await reverseGeocode(latitude, longitude, true);
+          }
           debugLog("location:same-place-cache-kept", { distKm: distFromCache.toFixed(3) });
           return;
         }
 
-        // ── STEP 3: Location changed > 3 km — full refresh ────────────────
-        saveLastKnownLocation(latitude, longitude, null);
-        // Recalculate timings with new coords while geocoding runs in parallel
-        const timingsPromise = getSunriseSunset(latitude, longitude, null);
+        // ── STEP 3: Moved beyond threshold — update silently; keep cache visible until geocode returns ──
+        const timingsPromise = getSunriseSunset(
+          latitude,
+          longitude,
+          lastKnown?.locationName || null
+        );
         await reverseGeocode(latitude, longitude, true);
         await timingsPromise;
       },
       async (error) => {
+        if (!isPlaceSwitchCurrent(locationRequestSeq) || isManualSavedPlaceActive()) {
+          setLocationLoading(false);
+          return;
+        }
         debugLog("location:geolocation-error", {
           elapsedMs: Math.round(performance.now() - startedAt),
           code: error?.code,
@@ -4424,6 +4927,15 @@ async function getLocation() {
           }
         }
 
+        // We have a usable cache (address or coords) — keep it on screen and
+        // ignore the transient GPS error. On failure we always show coordinates.
+        if (hasUsableLocationCache(lastKnown)) {
+          paintCachedGpsLocation(lastKnown);
+          debugLog("location:gps-error-cache-kept", { code: error?.code });
+          locationLog("gps-error-cache-kept", { code: error?.code });
+          return;
+        }
+
         if (REQUIRE_MANDATORY_LOCATION_PERMISSION) {
           setLocationLoading(false);
           setPermissionGateVisible(
@@ -4433,15 +4945,11 @@ async function getLocation() {
           return;
         }
 
-        // If we already showed cached data in Step 1, GPS error is silent — no IP fallback needed
-        if (lastKnown?.lat) {
-          setLocationLoading(false);
-          debugLog("location:gps-error-cache-kept", { code: error?.code });
-          return;
-        }
-
-        locationLog("gps-fallback-started", { reason: `gps-error-${error?.code || "unknown"}` });
-        await getApproximateLocation();
+        // No cache and GPS failed — ask the user to enable location.
+        setLocationLoading(false);
+        document.getElementById("userLocation").innerText =
+          "Unable to detect location. Please enable location access for Agnihotra timings.";
+        locationLog("gps-error-no-cache", { code: error?.code });
       },
       {
         enableHighAccuracy: true,
@@ -4462,7 +4970,29 @@ async function getLocation() {
       );
       return;
     }
-    await getApproximateLocation();
+  }
+}
+
+async function fetchReverseGeocodeAddress(latitude, longitude) {
+  if (!isEffectivelyOnline()) return null;
+  const startedAt = performance.now();
+  try {
+    const resp = await fetchWithTimeout(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`,
+      { headers: { "Accept-Language": "en", "Accept": "application/json" } },
+      9000
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const detailedAddress = buildDetailedAddress(data, latitude, longitude);
+    const primary = detailedAddress.primary;
+    if (!primary) return null;
+    locationLog("reverse-geocode-fetched", {
+      elapsedMs: Math.round(performance.now() - startedAt),
+    });
+    return { primary, detail: detailedAddress.detail };
+  } catch (_) {
+    return null;
   }
 }
 
@@ -4471,158 +5001,148 @@ async function reverseGeocode(latitude, longitude, skipTimingFetch = false) {
   const startedAt = performance.now();
   debugLog("reverse-geocode:start", { skipTimingFetch });
 
-  // ── Nominatim reverse geocoding (OpenStreetMap) ───────────────────────────
-  // On any failure (network error, 4xx, 5xx, timeout) fall back to plain coordinates.
-  let resolvedName = null;
-  let resolvedDetail = null;
-  try {
-    if (navigator.onLine) {
-      const resp = await fetchWithTimeout(
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`,
-        { headers: { "Accept-Language": "en", "Accept": "application/json" } },
-        9000
-      );
-      if (resp.ok) {
-        const data = await resp.json();
-        const detailedAddress = buildDetailedAddress(data, latitude, longitude);
-        resolvedName = detailedAddress.primary;
-        resolvedDetail = detailedAddress.detail;
-        if (resolvedName) {
-          locationLog("source-gps+nominatim", { elapsedMs: Math.round(performance.now() - startedAt) });
-        }
-      }
-    }
-  } catch (_) {}
+  const resolved = await fetchReverseGeocodeAddress(latitude, longitude);
 
-  if (resolvedName) {
-    renderLocationCard({ label: "Detected Address:", primary: resolvedName, secondary: resolvedDetail });
-    saveLastKnownLocation(latitude, longitude, resolvedName, resolvedDetail);
-    if (!skipTimingFetch) await getSunriseSunset(latitude, longitude, resolvedName);
-    debugLog("reverse-geocode:success", { name: resolvedName, elapsedMs: Math.round(performance.now() - startedAt) });
-      } else {
-    // Nominatim absent / error — show plain coordinates, timings still work
+  if (resolved?.primary) {
+    renderLocationCard({
+      label: "Detected Address:",
+      primary: resolved.primary,
+      secondary: resolved.detail,
+    });
+    saveLastKnownLocation(latitude, longitude, resolved.primary, resolved.detail);
+    if (!skipTimingFetch) await getSunriseSunset(latitude, longitude, resolved.primary);
+    debugLog("reverse-geocode:success", {
+      name: resolved.primary,
+      elapsedMs: Math.round(performance.now() - startedAt),
+    });
+  } else {
     const coordDetail = `${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)}`;
     const coords = toCoordinateFallback();
     renderLocationCard({ label: "Your Location:", primary: coords, secondary: coordDetail });
     saveLastKnownLocation(latitude, longitude, coords, coordDetail);
     if (!skipTimingFetch) await getSunriseSunset(latitude, longitude, coords);
-    debugLog("reverse-geocode:coord-fallback", { elapsedMs: Math.round(performance.now() - startedAt) });
-    locationLog("source-gps-coordinates-fallback", {});
+    debugLog("reverse-geocode:coord-fallback", {
+      elapsedMs: Math.round(performance.now() - startedAt),
+    });
+    locationLog("source-gps-coordinates-fallback", {
+      note: "Will retry address when network is back.",
+    });
   }
 
   setLocationLoading(false);
 }
 
-async function reverseGeocodeApproximate(latitude, longitude, skipTimingFetch = false) {
-  // IP-based path: reuse Nominatim for the name lookup, same rules as GPS path.
-  await reverseGeocode(latitude, longitude, skipTimingFetch);
+let addressEnrichmentInFlight = false;
+let addressEnrichmentTimer = null;
+
+function locationNeedsAddressEnrichment(locationName, locationDetail) {
+  return (
+    window.AgnihotraSavedPlaces?.needsAddressEnrichment?.({
+      locationName,
+      locationDetail,
+    }) ?? !String(locationName || "").trim()
+  );
 }
 
-async function getApproximateLocation() {
+/** When network returns, fill in real addresses for GPS cache + saved places that only have coords. */
+async function enrichPendingLocationAddresses() {
+  if (!isEffectivelyOnline() || addressEnrichmentInFlight) return;
+  addressEnrichmentInFlight = true;
   const startedAt = performance.now();
-  debugLog("approx-location:start");
+  let placesUpdated = 0;
+
   try {
-    // If offline, show message and use default location or cached data
-    if (!navigator.onLine) {
-      document.getElementById(
-        "userLocation"
-      ).innerText = `Offline Mode - Unable to detect location automatically. Showing cached timings if available.`;
-      
-      setLocationLoading(false);
-      debugLog("approx-location:offline", {
-        elapsedMs: Math.round(performance.now() - startedAt)
-      });
-      return;
-    }
+    locationLog("address-enrich-start", {});
 
-    // Try multiple IP geolocation services to get coordinates only
-    const services = [
-      "https://ipapi.co/json/",
-      "https://geolocation-db.com/json/",
-      "https://freeipapi.com/api/json",
-      "https://ipgeolocation.abstractapi.com/v1/?api_key=",
-      "https://ipwho.is/",
-    ];
+    const coordKey = (s) =>
+      `${Number(s.lat).toFixed(4)},${Number(s.lng).toFixed(4)}`;
+    const seenCoords = new Set();
+    const snapshots = [getCurrentGpsSnapshot(), getLastKnownLocation()].filter(
+      (s) => {
+        if (!hasUsableLocationCache(s)) return false;
+        const key = coordKey(s);
+        if (seenCoords.has(key)) return false;
+        seenCoords.add(key);
+        return true;
+      }
+    );
 
-    let coordinates = null;
-
-    for (const service of services) {
-      try {
-        const response = await fetchWithTimeout(service, {}, 3500);
-
-        if (response.ok) {
-          const data = await response.json();
-
-          // Extract only coordinates from different API response formats
-          if (data.latitude && data.longitude) {
-            // ipapi.co, geolocation-db.com, ipwho.is format
-            coordinates = {
-              lat: parseFloat(data.latitude),
-              lng: parseFloat(data.longitude),
-            };
-            locationLog("ip-service-selected", { service });
-            break;
-          } else if (data.lat && data.lon) {
-            // Alternative lat/lon format
-            coordinates = {
-              lat: parseFloat(data.lat),
-              lng: parseFloat(data.lon),
-            };
-            locationLog("ip-service-selected", { service });
-            break;
+    for (const snap of snapshots) {
+      if (!locationNeedsAddressEnrichment(snap.locationName, snap.locationDetail)) {
+        continue;
+      }
+      const addr = await fetchReverseGeocodeAddress(snap.lat, snap.lng);
+      if (addr?.primary) {
+        const current = getCurrentGpsSnapshot();
+        if (current && coordKey(current) === coordKey(snap)) {
+          saveCurrentGpsSnapshot(snap.lat, snap.lng, addr.primary, addr.detail);
+        }
+        const lastKnown = getLastKnownLocation();
+        if (lastKnown && coordKey(lastKnown) === coordKey(snap)) {
+          saveLastKnownLocation(snap.lat, snap.lng, addr.primary, addr.detail);
+          if (!isManualSavedPlaceActive()) {
+            renderLocationCard({
+              label: "Detected Address:",
+              primary: addr.primary,
+              secondary: addr.detail,
+            });
           }
         }
-      } catch (serviceError) {
-        continue; // Try next service
+        locationLog("address-enrich-snapshot", { primary: addr.primary });
       }
+      await new Promise((r) => setTimeout(r, 1100));
     }
 
-    if (coordinates) {
-      // Update location text to show we're identifying the place
-      document.getElementById("userLocation").innerText =
-        "Identifying nearby place...";
+    const places = window.AgnihotraSavedPlaces?.getPlaces?.() || [];
+    for (const place of places) {
+      if (!window.AgnihotraSavedPlaces?.needsAddressEnrichment?.(place)) continue;
 
-      // Use the same reverse geocoding function to identify the place
-      const timingsPromise = getSunriseSunset(coordinates.lat, coordinates.lng);
-      await reverseGeocodeApproximate(coordinates.lat, coordinates.lng, true);
-      await timingsPromise;
-      debugLog("approx-location:success", {
-        elapsedMs: Math.round(performance.now() - startedAt)
-      });
-    } else {
-      throw new Error(
-        "All IP geolocation services failed to provide coordinates"
-      );
+      const addr = await fetchReverseGeocodeAddress(place.lat, place.lng);
+      if (addr?.primary) {
+        const result = window.AgnihotraSavedPlaces?.updatePlace?.(place.id, {
+          label: place.label,
+          lat: place.lat,
+          lng: place.lng,
+          locationName: addr.primary,
+          locationDetail: addr.detail,
+        });
+        if (result?.ok) {
+          placesUpdated += 1;
+          locationLog("address-enrich-place", {
+            id: place.id,
+            label: place.label,
+            primary: addr.primary,
+          });
+          const active = getActiveSavedPlace();
+          if (active?.id === place.id) {
+            renderSavedPlaceLocationCard(result.place);
+            updateLocationPlaceTriggerUI();
+          }
+        }
+      }
+      await new Promise((r) => setTimeout(r, 1100));
     }
-  } catch (error) {
-    console.error("IP geolocation failed:", error);
-    // No fallback coordinates - require user to enable location
-    document.getElementById(
-      "userLocation"
-    ).innerText = `Unable to detect location. Please refresh and allow location access for Agnihotra times.`;
 
-    // Add a note about enabling location
-    const upcomingElement = document.getElementById("upcomingTimes");
-    if (upcomingElement) {
-      upcomingElement.innerHTML =
-        "<li>Location access required for accurate Agnihotra timing</li>";
-    }
-
-    setLocationLoading(false);
-    debugLog("approx-location:error", {
+    locationLog("address-enrich-done", {
+      placesUpdated,
       elapsedMs: Math.round(performance.now() - startedAt),
-      error: error?.message || String(error)
     });
+    debugLog("address-enrich-done", { placesUpdated });
+  } catch (error) {
+    locationLog("address-enrich-error", { message: error?.message || String(error) });
+    debugLog("address-enrich-error", { message: error?.message || String(error) });
+  } finally {
+    addressEnrichmentInFlight = false;
   }
 }
 
-async function showError(error) {
-  document.getElementById(
-    "userLocation"
-  ).innerText = `Getting location...`;
-
-  // Try to get approximate location using IP-based geolocation
-  await getApproximateLocation();
+function scheduleAddressEnrichment(delayMs = 1500) {
+  clearTimeout(addressEnrichmentTimer);
+  addressEnrichmentTimer = setTimeout(() => {
+    enrichPendingLocationAddresses().catch((err) =>
+      console.warn("[AGNIHOTRA][LOCATION] address-enrich-failed", err)
+    );
+  }, delayMs);
 }
 
       // Offline status monitoring
@@ -4679,7 +5199,7 @@ window.onload = () => {
   // Only show location spinner on startup if there's no cached location — otherwise
   // getLocation() will show cached data instantly and hide the spinner itself.
   const _startupCache = getLastKnownLocation();
-  if (!_startupCache?.lat) setLocationLoading(true);
+  if (!hasUsableLocationCache(_startupCache)) setLocationLoading(true);
   setupLanguageToggle();
   setupSettingsPanel();
   setupTestReminderButton();
@@ -4721,8 +5241,12 @@ if ("serviceWorker" in navigator) {
   }
 }
 
-window.addEventListener('online', updateOnlineStatus);
-window.addEventListener('offline', updateOnlineStatus);
+window.addEventListener("online", () => {
+  updateOnlineStatus();
+  syncCurrentGpsSnapshotInBackground();
+  scheduleAddressEnrichment(1200);
+});
+window.addEventListener("offline", updateOnlineStatus);
 
 const appAudioControls = window.AgnihotraAudioControls?.create?.() || null;
 
@@ -4765,6 +5289,8 @@ function setupMobileMenuToggle() {
     window.__agnihotraMenuLastToggleAt = Date.now();
     navCheck.checked = open;
     nav.classList.toggle("menu-open", open);
+    navLabel.setAttribute("aria-expanded", open ? "true" : "false");
+    navLabel.setAttribute("aria-label", open ? "Close menu" : "Open menu");
     logMenu(open ? "open" : "close", { source });
   };
 
@@ -4852,7 +5378,74 @@ function setupMobileMenuOutsideClose() {
   });
 }
 
+function setupLandscapeOptimizations() {
+  const heroVideo = document.querySelector(".hero-video");
+  if (!heroVideo) return;
+
+  const landscapeQuery = window.matchMedia(
+    "(orientation: landscape) and (max-height: 520px)"
+  );
+
+  const syncHeroVideoForOrientation = () => {
+    const landscapePhone = landscapeQuery.matches;
+    if (landscapePhone) {
+      try {
+        heroVideo.pause();
+      } catch (_) {}
+      heroVideo.removeAttribute("autoplay");
+      return;
+    }
+    heroVideo.setAttribute("autoplay", "");
+    heroVideo.play?.().catch(() => {});
+  };
+
+  syncHeroVideoForOrientation();
+  if (typeof landscapeQuery.addEventListener === "function") {
+    landscapeQuery.addEventListener("change", syncHeroVideoForOrientation);
+  } else if (typeof landscapeQuery.addListener === "function") {
+    landscapeQuery.addListener(syncHeroVideoForOrientation);
+  }
+  window.addEventListener("orientationchange", syncHeroVideoForOrientation);
+}
+
+function bootstrapCachedLocationInstant() {
+  // Paint cached location + timings before the permission gate — never flash
+  // "Detecting…" when we already have coords or an address from last session.
+  try {
+    const savedPlace = getActiveSavedPlace();
+    if (savedPlace) {
+      renderSavedPlaceLocationCard(savedPlace);
+      setLocationLoading(false);
+      if (typeof getSunriseSunset === "function") {
+        getSunriseSunset(
+          savedPlace.lat,
+          savedPlace.lng,
+          savedPlace.locationName || savedPlace.label
+        );
+      }
+      locationLog?.("instant-saved-place-paint", { id: savedPlace.id });
+      return;
+    }
+
+    const cached = getLastKnownLocation();
+    if (!paintCachedGpsLocation(cached)) return;
+
+    if (typeof getSunriseSunset === "function") {
+      getSunriseSunset(cached.lat, cached.lng, cached.locationName || null);
+    }
+    const cacheAgeMs = Date.now() - (Number(cached.savedAt) || 0);
+    locationLog?.("instant-cache-paint", {
+      cacheAgeMs: Math.round(cacheAgeMs),
+      fresh: isLocationCacheFresh(cached),
+      hasName: Boolean(cached.locationName),
+    });
+  } catch (_) {}
+}
+
 document.addEventListener("DOMContentLoaded", function () {
+  bootstrapCachedLocationInstant();
+  setupSavedPlacesPicker();
+  setupLandscapeOptimizations();
   // Initialize audio players
   initAudioPlayer('sunrise-audio');
   initAudioPlayer('sunset-audio');
