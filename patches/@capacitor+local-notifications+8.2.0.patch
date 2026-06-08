@@ -99,14 +99,11 @@ index b2ea880..dd4fd69 100644
                  if (sound.contains(".")) {
                      sound = sound.substring(0, sound.lastIndexOf('.'));
                  }
-+                // AGNIHOTRA PATCH: Use USAGE_ALARM + FLAG_AUDIBILITY_ENFORCED so the bell routes
-+                // through the alarm stream and is less likely to be silenced by DND/silent modes.
-+                // Scheduling still uses setAlarmClock() so delivery is exact with no delays.
++                // AGNIHOTRA PATCH: USAGE_NOTIFICATION so Do Not Disturb can silence the bell.
++                // setAlarmClock() in LocalNotificationManager still fires at exact ritual time.
                  AudioAttributes audioAttributes = new AudioAttributes.Builder()
                      .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
--                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-+                    .setUsage(AudioAttributes.USAGE_ALARM)
-+                    .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
+                     .setUsage(AudioAttributes.USAGE_NOTIFICATION)
                      .build();
                  Uri soundUri = Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + context.getPackageName() + "/raw/" + sound);
                  notificationChannel.setSound(soundUri, audioAttributes);

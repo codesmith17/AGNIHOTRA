@@ -55,6 +55,27 @@
     return next;
   }
 
+  function isReminderNotification(notification = {}) {
+    const tagStr = String(notification?.extra?.tag || "");
+    return (
+      notification?.group === shared.CAPACITOR_NOTIFICATION_GROUP ||
+      tagStr.includes("native-reminder") ||
+      tagStr.includes("agnihotra-test-reminder")
+    );
+  }
+
+  async function countPendingReminders() {
+    const localNotifications = shared.getCapacitorLocalNotifications();
+    if (!localNotifications?.getPending) return 0;
+    try {
+      const pending = await localNotifications.getPending();
+      const list = pending?.notifications || [];
+      return list.filter((notification) => isReminderNotification(notification)).length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   function logNotify(message, meta = {}) {
     let serialized = "";
     try {
@@ -534,6 +555,11 @@
           vibrationEnabled,
         });
         await localNotifications.schedule({ notifications });
+        window.AgnihotraReminderResilience?.markScheduled?.({
+          count: notifications.length,
+          channelId: reminderChannelId,
+          source: "schedule-upcoming-native",
+        });
         window.AgnihotraInstrumentation?.recordReminderScheduled?.({
           count: notifications.length,
           channelId: reminderChannelId,
@@ -670,5 +696,6 @@
     scheduleUpcomingReminders,
     scheduleTestReminder,
     setupNativeNotificationObservers,
+    countPendingReminders,
   };
 })();

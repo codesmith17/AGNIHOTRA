@@ -14,6 +14,7 @@ public class MainActivity extends BridgeActivity {
         splashScreen.setKeepOnScreenCondition(() -> false);
 
         registerPlugin(AgnihotraWidgetPlugin.class);
+        registerPlugin(AgnihotraReminderPlugin.class);
         super.onCreate(savedInstanceState);
         // Keep the device screen awake whenever the app's window is in the
         // foreground. This is automatically cleared when the activity is

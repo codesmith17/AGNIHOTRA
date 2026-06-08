@@ -8,11 +8,13 @@ public final class AgnihotraWidgetStorage {
     private static final String KEY_LABEL = "next_label";
     private static final String KEY_TARGET_MS = "next_target_ms";
     private static final String KEY_TIME_TEXT = "next_time_text";
+    private static final String KEY_IS_SUNRISE = "next_is_sunrise";
     private static final String KEY_UPDATED_AT_MS = "updated_at_ms";
     private static final String KEY_WIDGET_TITLE = "widget_title";
     private static final String KEY_WIDGET_COUNTDOWN_LABEL = "widget_countdown_label";
     private static final String KEY_WIDGET_TIME_PASSED_LABEL = "widget_time_passed_label";
     private static final String KEY_WIDGET_NO_TIMING_LABEL = "widget_no_timing_label";
+    private static final String KEY_UPCOMING_EVENTS_JSON = "upcoming_events_json";
 
     private AgnihotraWidgetStorage() {}
 
@@ -21,21 +23,53 @@ public final class AgnihotraWidgetStorage {
             String label,
             long targetMs,
             String timeText,
+            boolean isSunrise,
             String widgetTitle,
             String widgetCountdownLabel,
             String widgetTimePassedLabel,
-            String widgetNoTimingLabel
+            String widgetNoTimingLabel,
+            String upcomingEventsJson
     ) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit()
+        SharedPreferences.Editor editor = prefs.edit()
                 .putString(KEY_LABEL, label == null ? "" : label)
                 .putLong(KEY_TARGET_MS, targetMs)
                 .putString(KEY_TIME_TEXT, timeText == null ? "" : timeText)
+                .putBoolean(KEY_IS_SUNRISE, isSunrise)
                 .putString(KEY_WIDGET_TITLE, widgetTitle == null ? "" : widgetTitle)
                 .putString(KEY_WIDGET_COUNTDOWN_LABEL, widgetCountdownLabel == null ? "" : widgetCountdownLabel)
                 .putString(KEY_WIDGET_TIME_PASSED_LABEL, widgetTimePassedLabel == null ? "" : widgetTimePassedLabel)
                 .putString(KEY_WIDGET_NO_TIMING_LABEL, widgetNoTimingLabel == null ? "" : widgetNoTimingLabel)
+                .putLong(KEY_UPDATED_AT_MS, System.currentTimeMillis());
+        if (upcomingEventsJson != null && !upcomingEventsJson.trim().isEmpty()) {
+            editor.putString(KEY_UPCOMING_EVENTS_JSON, upcomingEventsJson);
+        }
+        editor.apply();
+    }
+
+    public static void saveActiveTiming(
+            Context context,
+            String label,
+            long targetMs,
+            String timeText,
+            boolean isSunrise
+    ) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_LABEL, label == null ? "" : label)
+                .putLong(KEY_TARGET_MS, targetMs)
+                .putString(KEY_TIME_TEXT, timeText == null ? "" : timeText)
+                .putBoolean(KEY_IS_SUNRISE, isSunrise)
                 .putLong(KEY_UPDATED_AT_MS, System.currentTimeMillis())
+                .apply();
+    }
+
+    public static void clearActiveTiming(Context context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_LABEL, "")
+                .putLong(KEY_TARGET_MS, 0L)
+                .putString(KEY_TIME_TEXT, "")
                 .apply();
     }
 
@@ -62,10 +96,12 @@ public final class AgnihotraWidgetStorage {
         payload.label = prefs.getString(KEY_LABEL, "");
         payload.targetMs = prefs.getLong(KEY_TARGET_MS, 0L);
         payload.timeText = prefs.getString(KEY_TIME_TEXT, "");
+        payload.isSunrise = prefs.getBoolean(KEY_IS_SUNRISE, true);
         payload.widgetTitle = prefs.getString(KEY_WIDGET_TITLE, "");
         payload.widgetCountdownLabel = prefs.getString(KEY_WIDGET_COUNTDOWN_LABEL, "");
         payload.widgetTimePassedLabel = prefs.getString(KEY_WIDGET_TIME_PASSED_LABEL, "");
         payload.widgetNoTimingLabel = prefs.getString(KEY_WIDGET_NO_TIMING_LABEL, "");
+        payload.upcomingEventsJson = prefs.getString(KEY_UPCOMING_EVENTS_JSON, "");
         payload.updatedAtMs = prefs.getLong(KEY_UPDATED_AT_MS, 0L);
         return payload;
     }
@@ -74,10 +110,12 @@ public final class AgnihotraWidgetStorage {
         public String label;
         public long targetMs;
         public String timeText;
+        public boolean isSunrise;
         public String widgetTitle;
         public String widgetCountdownLabel;
         public String widgetTimePassedLabel;
         public String widgetNoTimingLabel;
+        public String upcomingEventsJson;
         public long updatedAtMs;
 
         public boolean hasTiming() {
