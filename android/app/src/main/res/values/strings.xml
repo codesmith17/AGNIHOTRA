@@ -5,8 +5,15 @@
     <string name="package_name">com.eternalagni.app</string>
     <string name="custom_url_scheme">com.eternalagni.app</string>
     <string name="widget_title">EternalAgni</string>
+    <string name="widget_subtitle">Agnihotra timings</string>
     <string name="widget_countdown_title">Countdown</string>
     <string name="widget_no_timing">Open app to load timing</string>
     <string name="widget_countdown_passed">Time passed</string>
     <string name="widget_logo_desc">EternalAgni logo</string>
+    <string name="widget_event_icon_desc">Sunrise or sunset</string>
+    <string name="widget_picker_name">Agnihotra Countdown</string>
+    <string name="widget_picker_description">Live countdown to next sunrise or sunset</string>
+    <string name="widget_preview_label">Sunrise</string>
+    <string name="widget_preview_time">5:56 AM</string>
+    <string name="widget_preview_countdown">9:05:54</string>
 </resources>

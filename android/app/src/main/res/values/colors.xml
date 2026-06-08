@@ -2,4 +2,32 @@
 <resources>
     <!-- Matches .app-splash darkest tone — seamless handoff to HTML splash -->
     <color name="agni_splash_bg">#0D0402</color>
+    <color name="launcher_gold_start">#FFE082</color>
+    <color name="launcher_gold_mid">#FFB300</color>
+    <color name="launcher_gold_end">#FF8F00</color>
+
+    <!-- Home-screen widget palette (matches in-app fire / gold theme) -->
+    <color name="widget_bg_dark">#0D0402</color>
+    <color name="widget_bg_mid">#1A0B05</color>
+    <color name="widget_bg_warm">#2A1309</color>
+    <color name="widget_gold">#E7A45A</color>
+    <color name="widget_gold_bright">#FFD700</color>
+    <color name="widget_text_primary">#FFFFFF</color>
+    <color name="widget_text_secondary">#FFFFFF</color>
+    <color name="widget_text_on_bright">#2D1200</color>
+    <color name="widget_text_shadow">#66000000</color>
+    <!-- Sunrise theme: bright gold gradient + warm ember-maroon ink (positive, fiery, high contrast) -->
+    <color name="widget_ink">#7A1E0A</color>
+    <color name="widget_ink_soft">#A8430F</color>
+
+    <!-- Sunset theme: dusk gradient (amber -> rose -> violet) + cream ink -->
+    <color name="widget_sunset_start">#FFB26B</color>
+    <color name="widget_sunset_mid">#EC5F8A</color>
+    <color name="widget_sunset_end">#6A4CC4</color>
+    <color name="widget_sunset_stroke">#4F2EA6</color>
+    <color name="widget_sunset_ink">#FFFFFF</color>
+    <color name="widget_sunset_ink_soft">#F0E4FF</color>
+    <color name="widget_text_muted">#B8A898</color>
+    <color name="widget_moon">#4B0082</color>
+    <color name="widget_moon_soft">#7B5CB8</color>
 </resources>

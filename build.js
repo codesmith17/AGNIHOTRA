@@ -49,6 +49,7 @@ const filesToCopy = [
     'manifest.webmanifest',
     'translations.json',
     'shared/notifications/core.js',
+    'shared/notifications/resilience.js',
     'shared/audio/bell.js',
     'shared/app/audio-controls.js',
     'shared/app/permissions-gate.js',

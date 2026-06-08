@@ -1550,6 +1550,35 @@ function buildNativeReminderEventsFromTimings(timings, daysAhead = 30) {
   return events.sort((a, b) => a.time - b.time);
 }
 
+async function rescheduleNativeRemindersFromCache(reason = "manual", evaluation = {}) {
+  if (!isNativeAppRuntime()) {
+    return { ok: false, reason: "not-native" };
+  }
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) {
+      return { ok: false, reason: "no-cache" };
+    }
+    const cache = JSON.parse(raw);
+    if (!cache?.timings || typeof cache.timings !== "object") {
+      return { ok: false, reason: "no-timings" };
+    }
+    console.log(
+      `[AGNIHOTRA][NOTIFY] resilience-reschedule ${JSON.stringify({
+        reason,
+        why: evaluation?.why || null,
+        days: Object.keys(cache.timings).length,
+      })}`
+    );
+    scheduleNativeRemindersFromTimings(cache.timings, { replaceExisting: true });
+    return { ok: true, reason, days: Object.keys(cache.timings).length };
+  } catch (error) {
+    return { ok: false, reason: "error", error: error?.message || String(error) };
+  }
+}
+
+window.AgnihotraRescheduleReminders = rescheduleNativeRemindersFromCache;
+
 function scheduleNativeRemindersFromTimings(timings, options = {}) {
   latestTimingsForNativeReminders = timings || latestTimingsForNativeReminders;
   const events = buildNativeReminderEventsFromTimings(
@@ -4057,6 +4086,40 @@ function buildUpcomingEvents(todayResults, tomorrowResults, currentTime = Date.n
   return candidates.slice(-2);
 }
 
+function buildWidgetUpcomingEvents(todayResults, tomorrowResults, currentTime = Date.now()) {
+  const { todayKey, tomorrowKey } = getDeviceTodayTomorrowKeys();
+  const today = normalizeTimingDayResults(todayResults, todayKey);
+  const tomorrow = normalizeTimingDayResults(tomorrowResults, tomorrowKey);
+  if (!today?.sunrise || !today?.sunset || !tomorrow?.sunrise || !tomorrow?.sunset) {
+    return [];
+  }
+
+  return [
+    {
+      label: t("events.todaysSunrise", "Today's Sunrise"),
+      time: parseDateTime(today.date, today.sunrise),
+      isSunrise: true,
+    },
+    {
+      label: t("events.todaysSunset", "Today's Sunset"),
+      time: parseDateTime(today.date, today.sunset),
+      isSunrise: false,
+    },
+    {
+      label: t("events.tomorrowsSunrise", "Tomorrow's Sunrise"),
+      time: parseDateTime(tomorrow.date, tomorrow.sunrise),
+      isSunrise: true,
+    },
+    {
+      label: t("events.tomorrowsSunset", "Tomorrow's Sunset"),
+      time: parseDateTime(tomorrow.date, tomorrow.sunset),
+      isSunrise: false,
+    },
+  ]
+    .filter((event) => Number.isFinite(event.time) && event.time > currentTime)
+    .sort((a, b) => a.time - b.time);
+}
+
 function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
   const element = document.getElementById(elementId);
   const countdownElement = document.getElementById("upcomingCountdown");
@@ -4119,7 +4182,10 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
   });
 
   if (nextEvent) {
-    syncNativeHomescreenWidget(nextEvent);
+    syncNativeHomescreenWidget(
+      nextEvent,
+      buildWidgetUpcomingEvents(todayRow, tomorrowRow)
+    );
   }
 
 }
@@ -4145,7 +4211,12 @@ function refreshUpcomingTimeOnlyCardsFromCache(reason = "time-window-open") {
         false
       );
     });
-    if (upcomingEvents[0]) syncNativeHomescreenWidget(upcomingEvents[0]);
+    if (upcomingEvents[0]) {
+      syncNativeHomescreenWidget(
+        upcomingEvents[0],
+        buildWidgetUpcomingEvents(cached.todayRow, cached.tomorrowRow)
+      );
+    }
     debugLog("upcoming-time-only:refreshed", { reason });
     return true;
   } catch (error) {
@@ -4171,20 +4242,31 @@ function displayUpcomingTimeOnly(element, label, time, isSunrise, isNext = false
   element.appendChild(itemDiv);
 }
 
-async function syncNativeHomescreenWidget(nextEvent) {
+async function syncNativeHomescreenWidget(nextEvent, upcomingEvents = []) {
   if (!isNativeAppRuntime()) return;
   const widgetPlugin = window.Capacitor?.Plugins?.AgnihotraWidget;
   if (!widgetPlugin?.setNextTiming) return;
+
+  const events = (Array.isArray(upcomingEvents) ? upcomingEvents : [])
+    .filter((event) => event && Number.isFinite(event.time))
+    .map((event) => ({
+      label: event.label,
+      targetMs: Number(event.time),
+      timeText: formatDateTimeToTimeOnly(event.time),
+      isSunrise: Boolean(event.isSunrise),
+    }));
 
   try {
     await widgetPlugin.setNextTiming({
       label: nextEvent.label,
       targetMs: Number(nextEvent.time || 0),
       timeText: formatDateTimeToTimeOnly(nextEvent.time),
+      isSunrise: Boolean(nextEvent.isSunrise),
       widgetTitle: t("widget.title", "EternalAgni"),
-      widgetCountdownLabel: "Countdown",
+      widgetCountdownLabel: t("widget.countdown", "Countdown"),
       widgetTimePassedLabel: t("widget.timePassed", "Time passed"),
       widgetNoTimingLabel: t("widget.noTiming", "Open app to load timing"),
+      upcomingEvents: events,
     });
   } catch (error) {
     console.warn("[AGNIHOTRA][WIDGET] sync-failed", error);
