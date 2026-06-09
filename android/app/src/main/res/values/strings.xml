@@ -8,6 +8,9 @@
     <string name="widget_subtitle">Agnihotra timings</string>
     <string name="widget_countdown_title">Countdown</string>
     <string name="widget_no_timing">Open app to load timing</string>
+    <string name="widget_loading">Setting up…</string>
+    <string name="widget_location_default">Your sky ✦</string>
+    <string name="widget_location_desc">Saved location</string>
     <string name="widget_countdown_passed">Time passed</string>
     <string name="widget_logo_desc">EternalAgni logo</string>
     <string name="widget_event_icon_desc">Sunrise or sunset</string>

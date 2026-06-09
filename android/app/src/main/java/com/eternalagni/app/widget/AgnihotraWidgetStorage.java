@@ -15,6 +15,7 @@ public final class AgnihotraWidgetStorage {
     private static final String KEY_WIDGET_TIME_PASSED_LABEL = "widget_time_passed_label";
     private static final String KEY_WIDGET_NO_TIMING_LABEL = "widget_no_timing_label";
     private static final String KEY_UPCOMING_EVENTS_JSON = "upcoming_events_json";
+    private static final String KEY_LOCATION_TAG = "location_tag";
 
     private AgnihotraWidgetStorage() {}
 
@@ -28,7 +29,8 @@ public final class AgnihotraWidgetStorage {
             String widgetCountdownLabel,
             String widgetTimePassedLabel,
             String widgetNoTimingLabel,
-            String upcomingEventsJson
+            String upcomingEventsJson,
+            String locationTag
     ) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         SharedPreferences.Editor editor = prefs.edit()
@@ -40,6 +42,7 @@ public final class AgnihotraWidgetStorage {
                 .putString(KEY_WIDGET_COUNTDOWN_LABEL, widgetCountdownLabel == null ? "" : widgetCountdownLabel)
                 .putString(KEY_WIDGET_TIME_PASSED_LABEL, widgetTimePassedLabel == null ? "" : widgetTimePassedLabel)
                 .putString(KEY_WIDGET_NO_TIMING_LABEL, widgetNoTimingLabel == null ? "" : widgetNoTimingLabel)
+                .putString(KEY_LOCATION_TAG, locationTag == null ? "" : locationTag)
                 .putLong(KEY_UPDATED_AT_MS, System.currentTimeMillis());
         if (upcomingEventsJson != null && !upcomingEventsJson.trim().isEmpty()) {
             editor.putString(KEY_UPCOMING_EVENTS_JSON, upcomingEventsJson);
@@ -91,8 +94,25 @@ public final class AgnihotraWidgetStorage {
     }
 
     public static WidgetPayload read(Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         WidgetPayload payload = new WidgetPayload();
+        SharedPreferences prefs;
+        try {
+            prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        } catch (Throwable t) {
+            // Credential-encrypted prefs can be unavailable before the user
+            // unlocks the device (direct boot). Return safe defaults so the
+            // widget still renders instead of crashing the boot broadcast.
+            payload.label = "";
+            payload.timeText = "";
+            payload.isSunrise = true;
+            payload.widgetTitle = "";
+            payload.widgetCountdownLabel = "";
+            payload.widgetTimePassedLabel = "";
+            payload.widgetNoTimingLabel = "";
+            payload.upcomingEventsJson = "";
+            payload.locationTag = "";
+            return payload;
+        }
         payload.label = prefs.getString(KEY_LABEL, "");
         payload.targetMs = prefs.getLong(KEY_TARGET_MS, 0L);
         payload.timeText = prefs.getString(KEY_TIME_TEXT, "");
@@ -102,6 +122,7 @@ public final class AgnihotraWidgetStorage {
         payload.widgetTimePassedLabel = prefs.getString(KEY_WIDGET_TIME_PASSED_LABEL, "");
         payload.widgetNoTimingLabel = prefs.getString(KEY_WIDGET_NO_TIMING_LABEL, "");
         payload.upcomingEventsJson = prefs.getString(KEY_UPCOMING_EVENTS_JSON, "");
+        payload.locationTag = prefs.getString(KEY_LOCATION_TAG, "");
         payload.updatedAtMs = prefs.getLong(KEY_UPDATED_AT_MS, 0L);
         return payload;
     }
@@ -116,6 +137,7 @@ public final class AgnihotraWidgetStorage {
         public String widgetTimePassedLabel;
         public String widgetNoTimingLabel;
         public String upcomingEventsJson;
+        public String locationTag;
         public long updatedAtMs;
 
         public boolean hasTiming() {

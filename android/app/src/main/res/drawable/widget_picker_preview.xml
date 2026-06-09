@@ -2,58 +2,49 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
-            <corners android:radius="24dp" />
+            <corners android:radius="22dp" />
             <gradient
-                android:angle="135"
-                android:startColor="@color/launcher_gold_start"
-                android:centerColor="@color/launcher_gold_mid"
-                android:endColor="@color/launcher_gold_end" />
+                android:angle="115"
+                android:startColor="#FFE38A"
+                android:centerColor="#FFC24D"
+                android:endColor="#FF9D5C" />
             <stroke
-                android:width="1.5dp"
-                android:color="#E69500" />
+                android:width="1dp"
+                android:color="#33000000" />
             <size
-                android:width="110dp"
-                android:height="110dp" />
+                android:width="150dp"
+                android:height="66dp" />
         </shape>
     </item>
 
     <item
         android:width="22dp"
         android:height="22dp"
-        android:drawable="@drawable/ic_widget_sun"
-        android:gravity="top|center_horizontal"
-        android:top="20dp" />
+        android:drawable="@drawable/ic_widget_sunrise_sea"
+        android:gravity="center_vertical|right"
+        android:right="16dp" />
 
     <item
-        android:width="52dp"
-        android:height="5dp"
-        android:gravity="top|center_horizontal"
-        android:top="48dp">
-        <shape android:shape="rectangle">
-            <corners android:radius="2dp" />
-            <solid android:color="@color/widget_ink" />
-        </shape>
-    </item>
-
-    <item
-        android:width="64dp"
-        android:height="12dp"
-        android:gravity="center"
-        android:top="6dp">
+        android:width="70dp"
+        android:height="11dp"
+        android:gravity="center_vertical|left"
+        android:left="16dp"
+        android:bottom="14dp">
         <shape android:shape="rectangle">
             <corners android:radius="3dp" />
-            <solid android:color="@color/widget_ink" />
+            <solid android:color="#3A1A07" />
         </shape>
     </item>
 
     <item
-        android:width="36dp"
-        android:height="5dp"
-        android:gravity="bottom|center_horizontal"
-        android:bottom="22dp">
+        android:width="48dp"
+        android:height="6dp"
+        android:gravity="center_vertical|left"
+        android:left="16dp"
+        android:top="18dp">
         <shape android:shape="rectangle">
             <corners android:radius="2dp" />
-            <solid android:color="@color/widget_ink_soft" />
+            <solid android:color="#883A1A07" />
         </shape>
     </item>
 </layer-list>

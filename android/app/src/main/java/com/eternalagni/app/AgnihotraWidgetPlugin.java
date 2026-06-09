@@ -23,6 +23,7 @@ public class AgnihotraWidgetPlugin extends Plugin {
         String widgetCountdownLabel = call.getString("widgetCountdownLabel", "");
         String widgetTimePassedLabel = call.getString("widgetTimePassedLabel", "");
         String widgetNoTimingLabel = call.getString("widgetNoTimingLabel", "");
+        String locationTag = call.getString("locationTag", "");
         String upcomingEventsJson = serializeUpcomingEvents(call.getArray("upcomingEvents"));
 
         if (targetMs <= 0L || label == null || label.isEmpty()) {
@@ -40,7 +41,8 @@ public class AgnihotraWidgetPlugin extends Plugin {
                 widgetCountdownLabel,
                 widgetTimePassedLabel,
                 widgetNoTimingLabel,
-                upcomingEventsJson
+                upcomingEventsJson,
+                locationTag
         );
         AgnihotraWidgetScheduler.refreshAndReschedule(getContext());
 

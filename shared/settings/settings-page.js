@@ -11,6 +11,12 @@
   const MIN_REMINDER_LEAD = 2;
   const MAX_REMINDER_LEAD = 60;
 
+  // Translate via the shared page i18n module (falls back to English text).
+  function tr(key, fallback) {
+    const translated = window.AgnihotraI18n?.t?.(key, fallback);
+    return translated != null ? translated : fallback;
+  }
+
   function setStatus(message, isError = false) {
     const node = document.getElementById("supportLogExportStatus");
     if (!node) return;
@@ -173,7 +179,7 @@
           await nativeShare.share({
             ...sharePayload,
           });
-          setStatus("Support report shared.");
+          setStatus(tr("support.status.shared", "Support report shared."));
           return;
         }
       } catch (_) {}
@@ -190,13 +196,13 @@
           text: "Support report for issue debugging.",
           files: [file],
         });
-        setStatus("Support report shared.");
+        setStatus(tr("support.status.shared", "Support report shared."));
         return;
       }
     } catch (_) {}
 
     downloadBlob(blob, filename);
-    setStatus("Support report downloaded. Please share this file.");
+    setStatus(tr("support.status.downloaded", "Support report downloaded. Please share this file."));
   }
 
   function openSupportEmailDraft() {
@@ -274,7 +280,7 @@
             },
           ],
         });
-        setStatus("Email composer opened with report attached.");
+        setStatus(tr("support.status.emailOpened", "Email composer opened with report attached."));
         return;
       } catch (_) {}
     }
@@ -303,7 +309,7 @@
           await nativeShare.share({
             ...sharePayload,
           });
-          setStatus("Choose Gmail/Email app. Report file is attached.");
+          setStatus(tr("support.status.chooseEmailApp", "Choose Gmail/Email app. Report file is attached."));
           return;
         }
       } catch (_) {}
@@ -320,14 +326,14 @@
           text: `${shareText}\nTo: ${SUPPORT_EMAIL}`,
           files: [file],
         });
-        setStatus("Choose your email app. Report file is attached.");
+        setStatus(tr("support.status.chooseEmailApp", "Choose Gmail/Email app. Report file is attached."));
         return;
       }
     } catch (_) {}
 
     downloadBlob(blob, filename);
     openSupportEmailDraft();
-    setStatus("Email draft opened. Attach downloaded report and send.");
+    setStatus(tr("support.status.emailDraft", "Email draft opened. Attach downloaded report and send."));
   }
 
   function setupTimeFormat() {
@@ -351,7 +357,7 @@
         current = next;
         setTimeFormat(next);
         sync();
-        setStatus("Time format saved.");
+        setStatus(tr("settings.status.timeFormatSaved", "Time format saved."));
         window.AgnihotraInstrumentation?.recordSettingsChange?.("time-format", next);
       });
     });
@@ -371,7 +377,7 @@
       val = Math.max(MIN_REMINDER_LEAD, Math.min(MAX_REMINDER_LEAD, val));
       input.value = val;
       setReminderLeadTime(val);
-      setStatus("Reminder timing saved.");
+      setStatus(tr("settings.status.reminderSaved", "Reminder timing saved."));
       window.AgnihotraInstrumentation?.recordSettingsChange?.("reminder-lead-minutes", val);
     });
   }
@@ -381,7 +387,8 @@
     storageKey,
     defaultValue,
     settingName,
-    savedMessage,
+    savedMessageKey,
+    savedMessageFallback,
     onAfterChange,
   }) {
     const input = document.getElementById(inputId);
@@ -389,7 +396,7 @@
     input.checked = getBooleanSetting(storageKey, defaultValue);
     input.addEventListener("change", async () => {
       setBooleanSetting(storageKey, input.checked);
-      setStatus(savedMessage);
+      setStatus(tr(savedMessageKey, savedMessageFallback));
       window.AgnihotraInstrumentation?.recordSettingsChange?.(settingName, input.checked);
       try {
         await onAfterChange?.(input.checked);
@@ -407,7 +414,8 @@
       storageKey: REMINDER_VIBRATE_STORAGE_KEY,
       defaultValue: true,
       settingName: "reminder-vibrate",
-      savedMessage: "Vibration setting saved.",
+      savedMessageKey: "settings.status.vibrationSaved",
+      savedMessageFallback: "Vibration setting saved.",
       onAfterChange: async (enabled) => {
         console.log(
           `[AGNIHOTRA][VIBRATE] settings-changed ${JSON.stringify({ enabled })}`
@@ -422,17 +430,18 @@
       storageKey: WATCH_ALERT_STORAGE_KEY,
       defaultValue: false,
       settingName: "watch-alert",
-      savedMessage: "Smart watch alert setting saved.",
+      savedMessageKey: "settings.status.watchSaved",
+      savedMessageFallback: "Smart watch alert setting saved.",
     });
     const shareBtn = document.getElementById("exportSupportLogsBtn");
     const emailBtn = document.getElementById("emailSupportBtn");
     shareBtn?.addEventListener("click", async () => {
       shareBtn.disabled = true;
-      setStatus("Preparing support report...");
+      setStatus(tr("support.status.preparing", "Preparing support report..."));
       try {
         await shareSupportReport();
       } catch (error) {
-        setStatus("Unable to prepare support report. Try again.", true);
+        setStatus(tr("support.status.prepareFailed", "Unable to prepare support report. Try again."), true);
         console.error("[AGNIHOTRA][SUPPORT] share-failed", error);
       } finally {
         shareBtn.disabled = false;
@@ -440,13 +449,13 @@
     });
     emailBtn?.addEventListener("click", async () => {
       emailBtn.disabled = true;
-      setStatus("Preparing email with report...");
+      setStatus(tr("support.status.emailPreparing", "Preparing email with report..."));
       try {
         await emailSupportWithAttachment();
       } catch (error) {
         console.error("[AGNIHOTRA][SUPPORT] email-with-attachment-failed", error);
         openSupportEmailDraft();
-        setStatus("Email draft opened. Please attach report manually.", true);
+        setStatus(tr("support.status.emailDraftManual", "Email draft opened. Please attach report manually."), true);
       } finally {
         emailBtn.disabled = false;
       }
@@ -504,11 +513,11 @@
     btn.addEventListener("click", async () => {
       const ota = window.AgnihotraOTA;
       if (!ota?.forceCheck) {
-        setOtaStatus("Updater not loaded yet. Try again in a moment.", true);
+        setOtaStatus(tr("support.ota.status.notLoaded", "Updater not loaded yet. Try again in a moment."), true);
         return;
       }
       btn.disabled = true;
-      setOtaStatus("Checking for updates...");
+      setOtaStatus(tr("support.ota.status.checking", "Checking for updates..."));
       window.AgnihotraInstrumentation?.recordUserAction?.("ota-force-check-clicked");
       try {
         const res = await ota.forceCheck();
@@ -516,7 +525,7 @@
         setOtaStatus(msg, error);
       } catch (error) {
         console.error("[AGNIHOTRA][OTA] force-check-failed", error);
-        setOtaStatus("Update check failed. Please try again.", true);
+        setOtaStatus(tr("support.ota.status.failed", "Update check failed. Please try again."), true);
       } finally {
         btn.disabled = false;
       }
