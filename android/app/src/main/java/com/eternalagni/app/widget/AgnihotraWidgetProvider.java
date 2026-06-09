@@ -27,19 +27,14 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
 
     private static final String TAG = "AgniWidget";
 
-    // The widget renders as a single FIXED-SIZE card. These values must match the
-    // card dimensions in res/layout/agnihotra_widget_compact.xml and the target
-    // cell sizing in res/xml/agnihotra_widget_info.xml.
-    static final int WIDGET_CARD_WIDTH_DP = 180;
-    static final int WIDGET_CARD_HEIGHT_DP = 100;
+    // Fallback sky size (dp) used only when the launcher hasn't reported the
+    // widget's actual cell dimensions yet.
+    private static final int DEFAULT_SKY_WIDTH_DP = 180;
+    private static final int DEFAULT_SKY_HEIGHT_DP = 80;
 
     @Override
     public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
         AgniLog.i(context, TAG, "onUpdate ids=" + java.util.Arrays.toString(appWidgetIds));
-        // Force every (including legacy / oversized) placement back to the current
-        // fixed size so an incremental app update always replaces the old widget
-        // footprint with the new one.
-        enforceFixedSize(context, appWidgetManager, appWidgetIds);
         // Render from cached data FIRST so the widget always appears populated,
         // even during the fragile boot-restore window. Doing this before any
         // scheduling work guarantees the widget host never sees a crash/empty
@@ -58,10 +53,13 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
         super.onRestored(context, oldWidgetIds, newWidgetIds);
         AgniLog.i(context, TAG, "onRestored old=" + java.util.Arrays.toString(oldWidgetIds)
                 + " new=" + java.util.Arrays.toString(newWidgetIds));
+        // Paint the restored widget(s) from cache immediately so they are never
+        // blank right after a reboot/restore — don't wait for the follow-up
+        // onUpdate, which some launchers delay or skip.
         try {
-            enforceFixedSize(context, AppWidgetManager.getInstance(context), newWidgetIds);
+            renderFromCache(context, AppWidgetManager.getInstance(context), newWidgetIds);
         } catch (Throwable t) {
-            AgniLog.w(context, TAG, "onRestored enforceFixedSize failed", t);
+            AgniLog.w(context, TAG, "onRestored render failed", t);
         }
     }
 
@@ -111,30 +109,6 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
     }
 
     /**
-     * Pins every supplied widget to the fixed card size by overwriting its
-     * min/max width/height options. Most launchers honour these hints and will
-     * snap the host cell down to the new size, so a previously variable-size
-     * (oversized) widget is replaced by the current compact one on update.
-     */
-    private static void enforceFixedSize(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
-        if (appWidgetManager == null || appWidgetIds == null) return;
-        for (int appWidgetId : appWidgetIds) {
-            try {
-                Bundle sizing = new Bundle();
-                sizing.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, WIDGET_CARD_WIDTH_DP);
-                sizing.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, WIDGET_CARD_WIDTH_DP);
-                sizing.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, WIDGET_CARD_HEIGHT_DP);
-                sizing.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, WIDGET_CARD_HEIGHT_DP);
-                appWidgetManager.updateAppWidgetOptions(appWidgetId, sizing);
-                AgniLog.i(context, TAG, "enforceFixedSize id=" + appWidgetId
-                        + " -> " + WIDGET_CARD_WIDTH_DP + "x" + WIDGET_CARD_HEIGHT_DP + "dp");
-            } catch (Throwable t) {
-                AgniLog.w(context, TAG, "enforceFixedSize failed id=" + appWidgetId, t);
-            }
-        }
-    }
-
-    /**
      * Pushes RemoteViews built purely from previously-cached storage (no schedule
      * resolution or alarm scheduling), guarding every step so a single bad widget
      * id or unavailable preference store can never crash the boot broadcast.
@@ -179,7 +153,6 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
             return;
         }
         AgniLog.i(context, TAG, "updateAllWidgets count=" + appWidgetIds.length);
-        enforceFixedSize(context, manager, appWidgetIds);
 
         AgnihotraWidgetStorage.WidgetPayload payload =
                 AgnihotraWidgetScheduleResolver.resolveAndPersist(context.getApplicationContext());
@@ -228,9 +201,14 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
             views.setViewVisibility(R.id.widget_event_label, View.VISIBLE);
             views.setTextViewText(R.id.widget_event_label, topLine);
 
-            // Line 2: place name.
-            views.setViewVisibility(R.id.widget_location_tag, View.VISIBLE);
-            views.setTextViewText(R.id.widget_location_tag, location);
+            // Line 2: place name — only when a real place is known. Otherwise
+            // hide the chip rather than showing a generic placeholder.
+            if (location != null && !location.isEmpty()) {
+                views.setViewVisibility(R.id.widget_location_tag, View.VISIBLE);
+                views.setTextViewText(R.id.widget_location_tag, location);
+            } else {
+                views.setViewVisibility(R.id.widget_location_tag, View.GONE);
+            }
 
             // Legacy fields (used by the larger fallback layout).
             if (fullTime.isEmpty()) {
@@ -324,14 +302,15 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
     }
 
     /**
-     * Builds the small location chip text. Uses the first segment of the saved
-     * place name (e.g. "Saroj Nagar, Pune" -> "Saroj Nagar") and falls back to a
-     * cute default when the user hasn't tagged a location.
+     * Builds the small location chip text from the first segment of the saved
+     * place name (e.g. "Saroj Nagar, Pune" -> "Saroj Nagar"). Returns an empty
+     * string when no real place has been resolved yet — the caller then hides
+     * the chip entirely rather than showing a generic "Your sky" placeholder.
      */
     private static String prettyLocationTag(Context context, String rawTag) {
         String tag = rawTag == null ? "" : rawTag.trim();
         if (tag.isEmpty()) {
-            return context.getString(R.string.widget_location_default);
+            return "";
         }
         int comma = tag.indexOf(',');
         if (comma > 0) {
@@ -340,9 +319,7 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
         if (tag.length() > 22) {
             tag = tag.substring(0, 21).trim() + "…";
         }
-        return tag.isEmpty()
-                ? context.getString(R.string.widget_location_default)
-                : tag;
+        return tag;
     }
 
     private static String shortenEventLabel(String label) {
@@ -402,18 +379,25 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
         DisplayMetrics dm = context.getResources().getDisplayMetrics();
         float density = dm.density <= 0f ? 2f : dm.density;
 
-        // The card is a FIXED size in the layout (see agnihotra_widget_compact.xml),
-        // so the sky bitmap is always rendered to that fixed size regardless of the
-        // host cell. This keeps oversized legacy placements showing the same compact
-        // card instead of a stretched, blurry gradient.
-        int wDp = WIDGET_CARD_WIDTH_DP;
-        int hDp = WIDGET_CARD_HEIGHT_DP;
+        // Paint the gradient to the widget's ACTUAL cell size so it stays crisp
+        // and fills the card as the user resizes the widget.
+        int wDp = DEFAULT_SKY_WIDTH_DP;
+        int hDp = DEFAULT_SKY_HEIGHT_DP;
+        if (options != null) {
+            int maxW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0);
+            int maxH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0);
+            int minH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0);
+            if (maxW > 0) wDp = maxW;
+            // Prefer the larger reported height so portrait/landscape both fill.
+            int hCandidate = Math.max(maxH, minH);
+            if (hCandidate > 0) hDp = hCandidate;
+        }
 
         int w = Math.max(1, Math.round(wDp * density));
         int h = Math.max(1, Math.round(hDp * density));
         // Guard against pathological sizes.
-        w = Math.min(w, 1400);
-        h = Math.min(h, 700);
+        w = Math.min(w, 1600);
+        h = Math.min(h, 900);
 
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bmp);
@@ -421,7 +405,15 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
         float radius = Math.min(22f * density, Math.min(w, h) * 0.5f);
 
         Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-        fill.setShader(new LinearGradient(0f, 0f, w * 0.35f, h, sky.top, sky.bottom, Shader.TileMode.CLAMP));
+        // Vertical sky -> horizon gradient (realistic), with the warm/bright
+        // horizon band kept to the lower half via a 3-stop curve so the upper
+        // sky stays its true colour instead of washing into one flat blend.
+        int mid = blend(sky.top, sky.bottom, 0.32f);
+        fill.setShader(new LinearGradient(
+                0f, 0f, 0f, h,
+                new int[] { sky.top, mid, sky.bottom },
+                new float[] { 0f, 0.52f, 1f },
+                Shader.TileMode.CLAMP));
         RectF rect = new RectF(0f, 0f, w, h);
         canvas.drawRoundRect(rect, radius, radius, fill);
 
@@ -435,6 +427,17 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
                 radius, radius, stroke
         );
         return bmp;
+    }
+
+    /** Linear ARGB blend of two colours (t in 0..1). */
+    private static int blend(int a, int b, float t) {
+        int aa = (a >>> 24) & 0xFF, ar = (a >> 16) & 0xFF, ag = (a >> 8) & 0xFF, ab = a & 0xFF;
+        int ba = (b >>> 24) & 0xFF, br = (b >> 16) & 0xFF, bg = (b >> 8) & 0xFF, bb = b & 0xFF;
+        int ca = Math.round(aa + (ba - aa) * t);
+        int cr = Math.round(ar + (br - ar) * t);
+        int cg = Math.round(ag + (bg - ag) * t);
+        int cb = Math.round(ab + (bb - ab) * t);
+        return (ca << 24) | (cr << 16) | (cg << 8) | cb;
     }
 
     private static boolean isLoadingState(AgnihotraWidgetStorage.WidgetPayload payload) {

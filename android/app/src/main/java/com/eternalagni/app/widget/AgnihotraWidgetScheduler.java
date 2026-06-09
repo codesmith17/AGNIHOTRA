@@ -12,7 +12,7 @@ public final class AgnihotraWidgetScheduler {
     private static final int REQUEST_MIDNIGHT = 44002;
     private static final int REQUEST_SKY = 44003;
     private static final long TRANSITION_BUFFER_MS = 2_000L;
-    private static final long SKY_INTERVAL_MS = 30 * 60 * 1000L;
+    private static final long SKY_INTERVAL_MS = 45 * 60 * 1000L;
 
     private AgnihotraWidgetScheduler() {}
 
@@ -23,7 +23,17 @@ public final class AgnihotraWidgetScheduler {
 
         AgnihotraWidgetStorage.WidgetPayload payload = AgnihotraWidgetStorage.read(appContext);
         if (payload.hasTiming()) {
-            scheduleTransitionRefresh(appContext, payload.targetMs + TRANSITION_BUFFER_MS);
+            long now = System.currentTimeMillis();
+            if (payload.targetMs > now) {
+                // Fire EXACTLY at the event so the live countdown is replaced by
+                // the "moment complete" state at zero — never a negative number.
+                scheduleTransitionRefresh(appContext, payload.targetMs);
+            } else {
+                // Already in the post-event grace window: refresh once it ends so
+                // we advance to the next event after "moment complete" has shown.
+                long graceEnd = payload.targetMs + AgnihotraWidgetScheduleResolver.JUST_PASSED_GRACE_MS;
+                scheduleTransitionRefresh(appContext, Math.max(graceEnd, now + 1_000L));
+            }
         } else {
             cancelTransitionRefresh(appContext);
         }
@@ -33,7 +43,7 @@ public final class AgnihotraWidgetScheduler {
 
     /**
      * Keeps the time-of-day "sky" background drifting by re-rendering the widget
-     * roughly every half hour. Uses an inexact, battery-friendly alarm since the
+     * roughly every 45 minutes. Uses an inexact, battery-friendly alarm since the
      * colour change is gradual and does not need to fire on an exact instant.
      */
     private static void scheduleSkyRefresh(Context context) {

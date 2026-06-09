@@ -25,26 +25,33 @@ public final class SkyPalette {
         public int locationInk;
     }
 
-    // Hour-of-day anchors (0..24).
+    // Hour-of-day anchors (0..24). Densely spaced so that, sampled on the widget's
+    // ~45-minute refresh, the colour only ever moves one small step along the
+    // curve — a gradual light→medium→deep drift instead of a sudden jump.
     private static final float[] H = {
-            0f, 5f, 6.3f, 7.5f, 10f, 12.5f, 15f, 17f, 18f, 19.3f, 20.5f, 22f, 24f
+            0f, 3f, 5f, 6f, 6.75f, 7.5f, 9f, 11f, 13f, 15f, 16.5f, 17.5f, 18.25f, 19f, 20f, 21.5f, 24f
     };
-    // Gradient top colours at each anchor.
+    // Gradient TOP colours (upper sky) at each anchor. Realistic, desaturated
+    // photographic-sky tones: deep navy night, gentle blues by day, restrained
+    // warmth at the golden hours — no neon / cartoon saturation.
     private static final int[] TOP = {
-            0xFF0A1733, 0xFF16284F, 0xFF5566A0, 0xFFFFD27A, 0xFFFFE89C,
-            0xFFFFF3CE, 0xFFFAB957, 0xFFF59246, 0xFFF57A52, 0xFFB65C9A, 0xFF2E3A72, 0xFF112045, 0xFF0A1733
+            0xFF0B1426, 0xFF0C1428, 0xFF1A2A4A, 0xFF3A4E78, 0xFF6E8AB8, 0xFF86A8D0,
+            0xFF6E9AD0, 0xFF5A8FCC, 0xFF4F88C8, 0xFF5689C2, 0xFF6E90BE, 0xFF7C8FB2,
+            0xFF5E6E9A, 0xFF46527E, 0xFF2C3A60, 0xFF16243F, 0xFF0B1426
     };
-    // Gradient bottom colours at each anchor.
+    // Gradient BOTTOM colours (horizon) at each anchor — softly warmer near
+    // sunrise & sunset, pale haze by day, deep blue at night.
     private static final int[] BOT = {
-            0xFF0B1E40, 0xFF3A4E86, 0xFFE8956F, 0xFFFF9E5E, 0xFFFFCB5C,
-            0xFFFFE07A, 0xFFF59030, 0xFFEC6E3C, 0xFFEC5F7E, 0xFF5A4CC4, 0xFF122047, 0xFF0A1838, 0xFF0B1E40
+            0xFF122036, 0xFF13223A, 0xFF2C3C5C, 0xFF7A6E84, 0xFFD69B78, 0xFFEBC79A,
+            0xFFB8D2E8, 0xFFAECBE6, 0xFFA6C6E2, 0xFFACC6DE, 0xFFC9B68C, 0xFFE0A972,
+            0xFFD38A5C, 0xFF9A6E84, 0xFF4E4E72, 0xFF243A56, 0xFF122036
     };
 
-    private static final int INK_DARK = 0xFF3A1A07;       // warm espresso for bright skies
-    private static final int INK_DARK_SOFT = 0xCC5A3318;
+    private static final int INK_DARK = 0xFF20303F;       // deep slate for bright daytime skies
+    private static final int INK_DARK_SOFT = 0xCC3A4A59;
     private static final int INK_LIGHT = 0xFFFFFFFF;       // for dark/dusk/night skies
     private static final int INK_LIGHT_SOFT = 0xCCD6E2FF;  // cool moonlight for night text
-    private static final int LOC_DARK = 0xFF0E5A66;        // teal accent on bright skies
+    private static final int LOC_DARK = 0xFF1C4E80;        // deep sky-blue accent on bright skies
     private static final int LOC_LIGHT = 0xFFB9D4FF;       // icy blue accent on dark skies
 
     public static Sky now() {

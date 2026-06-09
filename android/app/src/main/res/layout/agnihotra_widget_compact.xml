@@ -1,10 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Root fills whatever cell the launcher allocated, but is fully transparent.
-  The visible widget is a FIXED-SIZE card centred inside it. This guarantees a
-  consistent compact look even for widgets that were placed when the provider
-  allowed larger / variable sizes (older installs) — those oversized cells now
-  simply show the same small card centred, instead of a stretched giant card.
+  The card fills the whole cell so the widget scales gracefully as the user
+  resizes it (the sky gradient is painted to the actual widget size, and the
+  content stays centred at any dimension).
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -14,8 +12,8 @@
 
     <FrameLayout
         android:id="@+id/widget_card"
-        android:layout_width="180dp"
-        android:layout_height="100dp"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:layout_gravity="center">
 
         <ImageView
