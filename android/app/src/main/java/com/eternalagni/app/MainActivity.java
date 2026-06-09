@@ -15,6 +15,7 @@ public class MainActivity extends BridgeActivity {
 
         registerPlugin(AgnihotraWidgetPlugin.class);
         registerPlugin(AgnihotraReminderPlugin.class);
+        registerPlugin(AgniSupportLogPlugin.class);
         super.onCreate(savedInstanceState);
         // Keep the device screen awake whenever the app's window is in the
         // foreground. This is automatically cleared when the activity is

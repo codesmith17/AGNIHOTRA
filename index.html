@@ -28,6 +28,53 @@
             }
         })();
     </script>
+    <!-- Native self-heal: a stale service worker (from older builds) can serve a
+         cached, out-of-date index.html offline while script.js/style.css come from
+         the fresh app bundle. That version skew breaks the layout (blank page,
+         missing top bar) when there is no network. On native we have the full web
+         bundle locally, so the SW is never needed: kill it + its caches as early
+         as possible, and reload once if this load was already controlled by it. -->
+    <script>
+        (function () {
+            try {
+                if (!window.AgnihotraRuntime || !window.AgnihotraRuntime.isNative) return;
+                if (!('serviceWorker' in navigator)) return;
+
+                var wasControlled = !!navigator.serviceWorker.controller;
+
+                function purge() {
+                    var jobs = [];
+                    try {
+                        jobs.push(navigator.serviceWorker.getRegistrations().then(function (regs) {
+                            return Promise.all((regs || []).map(function (r) { return r.unregister(); }));
+                        }));
+                    } catch (e) {}
+                    try {
+                        if (window.caches && caches.keys) {
+                            jobs.push(caches.keys().then(function (keys) {
+                                return Promise.all((keys || []).map(function (k) { return caches.delete(k); }));
+                            }));
+                        }
+                    } catch (e) {}
+                    return Promise.all(jobs);
+                }
+
+                // If a stale SW is controlling this load, the HTML/JS/CSS we just
+                // received may be mismatched. Purge then reload exactly once so the
+                // fresh bundled assets are used.
+                var alreadyHealed = false;
+                try { alreadyHealed = sessionStorage.getItem('agniSwHealed') === '1'; } catch (e) {}
+
+                if (wasControlled && !alreadyHealed) {
+                    try { sessionStorage.setItem('agniSwHealed', '1'); } catch (e) {}
+                    purge().then(function () { location.reload(); }).catch(function () { location.reload(); });
+                } else {
+                    // Not controlled (or already healed): still ensure nothing lingers.
+                    purge();
+                }
+            } catch (e) {}
+        })();
+    </script>
     <style>
         html.agni-platform-web #appSplash { display: none !important; visibility: hidden !important; }
         /* Native: cover the app until splash script dismisses — splash script is at end of body */
@@ -58,9 +105,9 @@
     <link rel="icon" type="image/png" sizes="512x512" href="assets/images/app-icon.png">
     <link rel="apple-touch-icon" href="assets/images/app-icon.png">
     <link rel="shortcut icon" href="assets/images/app-icon.png">
-    <link rel="stylesheet" href="https://icono-49d6.kxcdn.com/icono.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous">
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&family=Playfair+Display:wght@700&family=Noto+Sans+Devanagari:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/vendor/icono/icono.min.css">
+    <link rel="stylesheet" href="assets/vendor/fontawesome/css/all.min.css">
+    <link rel="stylesheet" href="assets/vendor/fonts/fonts.css">
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -921,7 +968,7 @@
             window.AgnihotraHideSplash = hideSplash;
         })();
     </script>
-    <script src="https://browser.sentry-cdn.com/8.51.0/bundle.tracing.min.js" crossorigin="anonymous"></script>
+    <script src="assets/vendor/sentry/bundle.tracing.min.js"></script>
     <script>
         (function () {
             if (!window.AgnihotraRuntime || !window.AgnihotraRuntime.isNative) return;
@@ -948,6 +995,212 @@
     <script src="shared/export/pdf-export.js"></script>
     <script src="shared/export/ics-export.js"></script>
     <script src="script.js"></script>
+    <!-- Offline render diagnostics: prints the live layout/visibility state to the
+         console (and therefore logcat) so blank-screen / offline issues can be
+         debugged without a remote DevTools connection. Active only when the
+         forced-offline flag or the debug overlay is enabled. -->
+    <script>
+        (function () {
+            try {
+                var cfg = window.AGNI_RUNTIME_CONFIG || {};
+                // Verbose, periodic full DOM dumps — only in offline/debug builds.
+                var verbose = String(cfg.forceOffline) === "true" || String(cfg.enableDebugOverlay) === "true";
+                // The lightweight online/offline + layout-safety guard runs on every
+                // native build (and offline/debug web builds) so any recurrence of the
+                // "blank offline" bug is logged — and auto-corrected — in production too.
+                var isNative = !!(window.AgnihotraRuntime && window.AgnihotraRuntime.isNative);
+                var guardOn = isNative || verbose;
+                if (!guardOn) return;
+
+                function rect(el) {
+                    var r = el.getBoundingClientRect();
+                    return { t: Math.round(r.top), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) };
+                }
+                function snap(sel) {
+                    var el = document.querySelector(sel);
+                    if (!el) return { sel: sel, missing: true };
+                    var c = getComputedStyle(el);
+                    return {
+                        sel: sel,
+                        display: c.display, visibility: c.visibility, opacity: c.opacity,
+                        position: c.position, transform: c.transform === "none" ? "none" : "set",
+                        rect: rect(el)
+                    };
+                }
+                function transformedAncestors(sel) {
+                    var el = document.querySelector(sel);
+                    var out = [];
+                    if (!el) return out;
+                    el = el.parentElement;
+                    while (el && el !== document.documentElement) {
+                        var c = getComputedStyle(el);
+                        if ((c.transform && c.transform !== "none") || (c.filter && c.filter !== "none") ||
+                            (c.perspective && c.perspective !== "none") || c.willChange === "transform" ||
+                            (c.contain && c.contain !== "normal" && c.contain !== "none")) {
+                            out.push((el.tagName) + (el.id ? "#" + el.id : "") +
+                                " {transform:" + c.transform + " filter:" + c.filter +
+                                " contain:" + c.contain + " willChange:" + c.willChange + "}");
+                        }
+                        el = el.parentElement;
+                    }
+                    return out;
+                }
+                function descEl(el) {
+                    if (!el) return "(null)";
+                    return el.tagName + (el.id ? "#" + el.id : "") +
+                        (el.className ? "." + String(el.className).trim().replace(/\s+/g, ".").slice(0, 60) : "");
+                }
+                function topElementsAtCenter() {
+                    var pts = [
+                        [0.5, 0.15], [0.5, 0.3], [0.5, 0.5], [0.5, 0.7], [0.5, 0.85]
+                    ];
+                    return pts.map(function (p) {
+                        var x = Math.round(window.innerWidth * p[0]);
+                        var y = Math.round(window.innerHeight * p[1]);
+                        return p[1] + "->" + descEl(document.elementFromPoint(x, y));
+                    });
+                }
+                function fullScreenOverlays() {
+                    var out = [];
+                    var all = document.body.querySelectorAll("*");
+                    for (var i = 0; i < all.length; i++) {
+                        var el = all[i];
+                        var c = getComputedStyle(el);
+                        if (c.position !== "fixed" && c.position !== "absolute") continue;
+                        if (c.visibility === "hidden" || c.display === "none" || c.opacity === "0") continue;
+                        var r = el.getBoundingClientRect();
+                        if (r.width >= window.innerWidth * 0.9 && r.height >= window.innerHeight * 0.7) {
+                            out.push(descEl(el) + " z=" + c.zIndex + " bg=" + c.backgroundColor + " op=" + c.opacity);
+                        }
+                    }
+                    return out;
+                }
+                function dump(phase) {
+                    var info = {
+                        phase: phase,
+                        readyState: document.readyState,
+                        htmlClass: document.documentElement.className,
+                        bodyVisibility: getComputedStyle(document.body).visibility,
+                        splashPresent: !!document.getElementById("appSplash"),
+                        topbar: snap(".topbar"),
+                        home: snap("#home"),
+                        heroInner: snap(".timings-hero-inner"),
+                        permissionGate: snap("#permissionGate, .permission-gate, [data-permission-gate]"),
+                        heroVideo: (function () {
+                            var v = document.querySelector("video");
+                            if (!v) return "(no video)";
+                            var c = getComputedStyle(v);
+                            return { paused: v.paused, readyState: v.readyState, display: c.display, visibility: c.visibility, op: c.opacity };
+                        })(),
+                        upcomingChildren: (document.getElementById("upcomingTimes") || {}).childElementCount,
+                        userLocation: ((document.getElementById("userLocation") || {}).textContent || "").trim().slice(0, 50),
+                        nav: snap(".bottom-nav"),
+                        navTransformedAncestors: transformedAncestors(".bottom-nav"),
+                        elementsAtPoints: topElementsAtCenter(),
+                        fullScreenOverlays: fullScreenOverlays(),
+                        scrollY: window.scrollY,
+                        currentPage: window.AgnihotraCurrentPage,
+                        forcedOffline: window.__agnihotraForcedOffline,
+                        navigatorOnline: navigator.onLine,
+                        innerH: window.innerHeight, innerW: window.innerWidth
+                    };
+                    console.info("[AGNIHOTRA][RENDER-DIAG] " + JSON.stringify(info));
+                }
+
+                window.AgnihotraRenderDiag = dump;
+
+                // ---- Always-on safety guard (native + offline/debug) -------------
+                // Detects and corrects any fixed element that has wrongly stretched
+                // to cover the screen (the offline "blank page" failure mode), and
+                // logs every online/offline transition with the layout state.
+                function enforceLayoutSafety(reason) {
+                    try {
+                        var vh = window.innerHeight || 0;
+                        var vw = window.innerWidth || 0;
+                        if (!vh || !vw) return;
+                        var navs = document.querySelectorAll("nav, .bottom-nav, .topbar");
+                        for (var i = 0; i < navs.length; i++) {
+                            var el = navs[i];
+                            var c = getComputedStyle(el);
+                            if (c.position !== "fixed") continue;
+                            var r = el.getBoundingClientRect();
+                            var coversScreen = r.height >= vh * 0.6 && r.width >= vw * 0.9;
+                            var isBottomNav = el.classList.contains("bottom-nav");
+                            if (coversScreen && (isBottomNav || el.tagName === "NAV")) {
+                                // Pathological: a tab/nav bar should never be this tall.
+                                console.error("[AGNIHOTRA][OFFLINE-GUARD] corrected-stretched-nav " + JSON.stringify({
+                                    reason: reason,
+                                    el: el.id || el.className,
+                                    before: { t: Math.round(r.top), b: Math.round(r.bottom), h: Math.round(r.height) },
+                                    cssTop: c.top, cssBottom: c.bottom, online: navigator.onLine,
+                                    bodyClass: document.body.className
+                                }));
+                                if (isBottomNav) {
+                                    el.style.setProperty("top", "auto", "important");
+                                    el.style.setProperty("bottom", "0", "important");
+                                    el.style.setProperty("height", "auto", "important");
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error("[AGNIHOTRA][OFFLINE-GUARD] guard-failed " + (e && e.message));
+                    }
+                }
+
+                function logTransition(reason) {
+                    try {
+                        var overlays = fullScreenOverlays();
+                        console.info("[AGNIHOTRA][OFFLINE-GUARD] " + JSON.stringify({
+                            reason: reason,
+                            online: navigator.onLine,
+                            forcedOffline: window.__agnihotraForcedOffline,
+                            htmlClass: document.documentElement.className,
+                            bodyClass: document.body.className,
+                            nav: snap(".bottom-nav").rect,
+                            topbar: snap(".topbar").rect,
+                            suspiciousOverlays: overlays
+                        }));
+                    } catch (e) {}
+                    enforceLayoutSafety(reason);
+                }
+
+                window.AgnihotraEnforceLayoutSafety = enforceLayoutSafety;
+                window.addEventListener("online", function () { logTransition("online-event"); });
+                window.addEventListener("offline", function () { logTransition("offline-event"); });
+                // Re-check whenever the splash finishes revealing content, and a few
+                // times after launch (covers the inset/banner settle that triggered
+                // the original bug).
+                [1200, 3000, 6000, 9000].forEach(function (ms) {
+                    setTimeout(function () { logTransition("startup+" + ms + "ms"); }, ms);
+                });
+
+                window.addEventListener("error", function (e) {
+                    console.error("[AGNIHOTRA][RENDER-DIAG] window-error " + JSON.stringify({
+                        message: e.message, source: e.filename, line: e.lineno, col: e.colno
+                    }));
+                });
+                window.addEventListener("unhandledrejection", function (e) {
+                    console.error("[AGNIHOTRA][RENDER-DIAG] unhandled-rejection " +
+                        String((e.reason && (e.reason.stack || e.reason.message)) || e.reason));
+                });
+
+                // ---- Verbose periodic full dumps (offline/debug builds only) ------
+                if (verbose) {
+                    if (document.readyState === "loading") {
+                        document.addEventListener("DOMContentLoaded", function () { dump("DOMContentLoaded"); });
+                    } else {
+                        dump("immediate");
+                    }
+                    window.addEventListener("load", function () { dump("window.load"); });
+                    setTimeout(function () { dump("t+2500ms"); }, 2500);
+                    setTimeout(function () { dump("t+5000ms"); }, 5000);
+                    setTimeout(function () { dump("t+8000ms"); }, 8000);
+                }
+            } catch (e) {
+                console.error("[AGNIHOTRA][RENDER-DIAG] diag-failed " + (e && e.message));
+            }
+        })();
+    </script>
 </body>
 
 </html>

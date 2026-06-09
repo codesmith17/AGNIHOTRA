@@ -1,4 +1,4 @@
-const CACHE_NAME = 'agnihotra-cache-v30';
+const CACHE_NAME = 'agnihotra-cache-v31';
 
 // Critical assets to cache on install
 const CRITICAL_ASSETS = [
@@ -231,6 +231,46 @@ self.addEventListener('fetch', (event) => {
               })
             );
           })
+        )
+    );
+    return;
+  }
+
+  // Same-origin scripts/styles: network-first so a fresh deploy is never masked
+  // by a stale cached bundle (which causes HTML/JS/CSS version skew and a broken
+  // or blank UI). Fall back to cache only when the network is unavailable.
+  const isCoreAsset =
+    isSameOrigin &&
+    (event.request.destination === 'script' ||
+      event.request.destination === 'style' ||
+      url.pathname.endsWith('.js') ||
+      url.pathname.endsWith('.css'));
+
+  if (isCoreAsset) {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          const ok =
+            networkResponse &&
+            networkResponse.status >= 200 &&
+            networkResponse.status < 300;
+          if (ok) {
+            const copy = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, copy).catch(() => {});
+            });
+          }
+          return networkResponse;
+        })
+        .catch(() =>
+          caches.match(event.request).then(
+            (cached) =>
+              cached ||
+              new Response('Offline - resource not available', {
+                status: 503,
+                statusText: 'Service Unavailable'
+              })
+          )
         )
     );
     return;

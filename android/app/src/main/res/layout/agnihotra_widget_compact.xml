@@ -1,135 +1,150 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Root fills whatever cell the launcher allocated, but is fully transparent.
+  The visible widget is a FIXED-SIZE card centred inside it. This guarantees a
+  consistent compact look even for widgets that were placed when the provider
+  allowed larger / variable sizes (older installs) — those oversized cells now
+  simply show the same small card centred, instead of a stretched giant card.
+-->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
 
-    <ImageView
-        android:id="@+id/widget_bg"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:scaleType="fitXY"
-        android:src="@drawable/widget_sky_preview"
-        android:importantForAccessibility="no"
-        android:contentDescription="@null" />
+    <FrameLayout
+        android:id="@+id/widget_card"
+        android:layout_width="180dp"
+        android:layout_height="100dp"
+        android:layout_gravity="center">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:gravity="center"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp"
-        android:paddingTop="6dp"
-        android:paddingBottom="6dp">
-
-        <!-- Logo on top, centered -->
         <ImageView
-            android:id="@+id/widget_event_icon"
-            android:layout_width="20dp"
-            android:layout_height="20dp"
-            android:src="@drawable/ic_widget_sunrise_sea"
-            android:contentDescription="@string/widget_event_icon_desc"
-            android:visibility="gone" />
+            android:id="@+id/widget_bg"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_sky_preview"
+            android:importantForAccessibility="no"
+            android:contentDescription="@null" />
 
-        <!-- Line 1: event + exact time, e.g. "Sunset 6:40:50 PM" -->
-        <TextView
-            android:id="@+id/widget_event_label"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="@string/widget_no_timing"
-            android:textColor="@color/widget_ink"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:includeFontPadding="false"
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
             android:gravity="center"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:shadowColor="#40000000"
-            android:shadowDx="0"
-            android:shadowDy="1"
-            android:shadowRadius="2" />
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp">
 
-        <!-- Line 2: place name -->
-        <TextView
-            android:id="@+id/widget_location_tag"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
-            android:text="@string/widget_location_default"
-            android:textColor="@color/widget_location"
-            android:textSize="10sp"
-            android:textStyle="bold"
-            android:letterSpacing="0.05"
-            android:textAllCaps="true"
-            android:includeFontPadding="false"
-            android:gravity="center"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:shadowColor="#40000000"
-            android:shadowDx="0"
-            android:shadowDy="1"
-            android:shadowRadius="2"
-            android:contentDescription="@string/widget_location_desc" />
+            <!-- Logo on top, centered -->
+            <ImageView
+                android:id="@+id/widget_event_icon"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_widget_sunrise_sea"
+                android:contentDescription="@string/widget_event_icon_desc"
+                android:visibility="gone" />
 
-        <!-- Line 3: live countdown -->
-        <TextView
-            android:id="@+id/widget_countdown"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="--"
-            android:textColor="@color/widget_ink"
-            android:textSize="22sp"
-            android:textStyle="bold"
-            android:fontFamily="sans-serif-medium"
-            android:fontFeatureSettings="tnum"
-            android:includeFontPadding="false"
-            android:maxLines="1"
-            android:shadowColor="#40000000"
-            android:shadowDx="0"
-            android:shadowDy="1"
-            android:shadowRadius="2" />
+            <!-- Line 1: event + exact time, e.g. "Sunset 6:40:50 PM" -->
+            <TextView
+                android:id="@+id/widget_event_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/widget_no_timing"
+                android:textColor="@color/widget_ink"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:includeFontPadding="false"
+                android:gravity="center"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:shadowColor="#40000000"
+                android:shadowDx="0"
+                android:shadowDy="1"
+                android:shadowRadius="2" />
 
-        <Chronometer
-            android:id="@+id/widget_countdown_chronometer"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:textColor="@color/widget_ink"
-            android:textSize="22sp"
-            android:textStyle="bold"
-            android:fontFamily="sans-serif-medium"
-            android:fontFeatureSettings="tnum"
-            android:includeFontPadding="false"
-            android:maxLines="1"
-            android:shadowColor="#40000000"
-            android:shadowDx="0"
-            android:shadowDy="1"
-            android:shadowRadius="2"
-            android:visibility="gone" />
+            <!-- Line 2: place name -->
+            <TextView
+                android:id="@+id/widget_location_tag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:text="@string/widget_location_default"
+                android:textColor="@color/widget_location"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.05"
+                android:textAllCaps="true"
+                android:includeFontPadding="false"
+                android:gravity="center"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:shadowColor="#40000000"
+                android:shadowDx="0"
+                android:shadowDy="1"
+                android:shadowRadius="2"
+                android:contentDescription="@string/widget_location_desc" />
 
-        <ProgressBar
-            android:id="@+id/widget_loading"
-            style="?android:attr/progressBarStyleSmall"
-            android:layout_width="20dp"
-            android:layout_height="20dp"
-            android:layout_marginTop="2dp"
-            android:indeterminate="true"
-            android:indeterminateTint="@color/widget_ink"
-            android:visibility="gone" />
+            <!-- Line 3: live countdown -->
+            <TextView
+                android:id="@+id/widget_countdown"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="--"
+                android:textColor="@color/widget_ink"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-medium"
+                android:fontFeatureSettings="tnum"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:shadowColor="#40000000"
+                android:shadowDx="0"
+                android:shadowDy="1"
+                android:shadowRadius="2" />
 
-        <!-- Retained for provider parity / larger layout -->
-        <TextView
-            android:id="@+id/widget_context"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:visibility="gone" />
-        <TextView
-            android:id="@+id/widget_event_time"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:visibility="gone" />
-    </LinearLayout>
+            <Chronometer
+                android:id="@+id/widget_countdown_chronometer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textColor="@color/widget_ink"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-medium"
+                android:fontFeatureSettings="tnum"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:shadowColor="#40000000"
+                android:shadowDx="0"
+                android:shadowDy="1"
+                android:shadowRadius="2"
+                android:visibility="gone" />
+
+            <ProgressBar
+                android:id="@+id/widget_loading"
+                style="?android:attr/progressBarStyleSmall"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_marginTop="2dp"
+                android:indeterminate="true"
+                android:indeterminateTint="@color/widget_ink"
+                android:visibility="gone" />
+
+            <!-- Retained for provider parity / larger layout -->
+            <TextView
+                android:id="@+id/widget_context"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:visibility="gone" />
+            <TextView
+                android:id="@+id/widget_event_time"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:visibility="gone" />
+        </LinearLayout>
+    </FrameLayout>
 </FrameLayout>

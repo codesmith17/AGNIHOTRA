@@ -432,6 +432,45 @@
     };
   }
 
+  // ─────────────────────── section: widget (native) ────────────────────
+
+  // The widget runs in a SEPARATE process, so its logs live in an on-device
+  // JSON-Lines file written by AgniLog. We read the tail back through the
+  // AgniSupportLog plugin so the single Support Report contains widget logs
+  // alongside the web-layer logs.
+  async function buildWidgetSection() {
+    const plugin = window.Capacitor?.Plugins?.AgniSupportLog;
+    if (!plugin?.readEntries) {
+      return { available: false, count: 0, entries: [] };
+    }
+
+    let info = null;
+    if (plugin.getInfo) {
+      info = await withTimeout(plugin.getInfo(), 1500, null);
+    }
+
+    const res = await withTimeout(plugin.readEntries({ limit: 400 }), 2000, null);
+    const text = res?.text || "";
+    const entries = [];
+    if (text) {
+      const rawLines = String(text).split("\n");
+      for (const raw of rawLines) {
+        const line = raw.trim();
+        if (!line) continue;
+        const parsed = safeJson(line, null);
+        entries.push(parsed || { raw: line });
+      }
+    }
+
+    return {
+      available: true,
+      path: info?.path || null,
+      fileBytes: num(info?.bytes),
+      count: entries.length,
+      entries,
+    };
+  }
+
   // ─────────────────────────── public API ──────────────────────────────
 
   async function build(options = {}) {
@@ -443,10 +482,11 @@
     };
 
     // gather all sections — fire async ones in parallel for speed
-    const [device, permissions, notifications] = await Promise.all([
+    const [device, permissions, notifications, widget] = await Promise.all([
       buildDeviceSection().catch(() => null),
       buildPermissionsSection(ctx).catch(() => null),
       buildNotificationsSection(ctx).catch(() => null),
+      buildWidgetSection().catch(() => null),
     ]);
 
     result.app = buildAppSection(ctx);
@@ -460,6 +500,7 @@
     result.lifecycle = buildLifecycleSection();
     result.errors = buildErrorsSection();
     result.logs = buildLogsSection(logs);
+    result.widget = widget || { available: false, count: 0, entries: [] };
 
     if (extra && typeof extra === "object") {
       result.extra = extra;
