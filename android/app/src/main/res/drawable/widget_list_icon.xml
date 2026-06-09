@@ -1,21 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item>
-        <shape android:shape="rectangle">
-            <corners android:radius="14dp" />
-            <gradient
-                android:angle="135"
-                android:startColor="#FFE082"
-                android:centerColor="#FFB300"
-                android:endColor="#FF8F00" />
-            <size
-                android:width="48dp"
-                android:height="48dp" />
-        </shape>
-    </item>
-    <item
-        android:width="24dp"
-        android:height="24dp"
-        android:drawable="@drawable/ic_stat_notify"
-        android:gravity="center" />
-</layer-list>
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/widget_list_logo"
+    android:gravity="center" />

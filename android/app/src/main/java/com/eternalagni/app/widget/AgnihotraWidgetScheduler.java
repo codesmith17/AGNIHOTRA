@@ -10,7 +10,9 @@ public final class AgnihotraWidgetScheduler {
     public static final String ACTION_WIDGET_REFRESH = "com.eternalagni.app.action.WIDGET_REFRESH";
     private static final int REQUEST_TRANSITION = 44001;
     private static final int REQUEST_MIDNIGHT = 44002;
+    private static final int REQUEST_SKY = 44003;
     private static final long TRANSITION_BUFFER_MS = 2_000L;
+    private static final long SKY_INTERVAL_MS = 30 * 60 * 1000L;
 
     private AgnihotraWidgetScheduler() {}
 
@@ -26,6 +28,29 @@ public final class AgnihotraWidgetScheduler {
             cancelTransitionRefresh(appContext);
         }
         scheduleMidnightRefresh(appContext);
+        scheduleSkyRefresh(appContext);
+    }
+
+    /**
+     * Keeps the time-of-day "sky" background drifting by re-rendering the widget
+     * roughly every half hour. Uses an inexact, battery-friendly alarm since the
+     * colour change is gradual and does not need to fire on an exact instant.
+     */
+    private static void scheduleSkyRefresh(Context context) {
+        AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (alarmManager == null) return;
+
+        long triggerAtMs = System.currentTimeMillis() + SKY_INTERVAL_MS;
+        PendingIntent pendingIntent = buildPendingIntent(context, REQUEST_SKY);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, triggerAtMs, pendingIntent);
+            } else {
+                alarmManager.set(AlarmManager.RTC, triggerAtMs, pendingIntent);
+            }
+        } catch (SecurityException ignored) {
+            alarmManager.set(AlarmManager.RTC, triggerAtMs, pendingIntent);
+        }
     }
 
     private static void scheduleTransitionRefresh(Context context, long triggerAtMs) {

@@ -1906,6 +1906,11 @@ function setupLanguageToggle() {
     refreshUpcomingEvents();
     scheduleNativeRemindersFromTimings(latestTimingsForNativeReminders);
     syncNavLangDropdownUI();
+    try {
+      window.dispatchEvent(
+        new CustomEvent("agnihotra:languagechange", { detail: { language: currentLanguage } })
+      );
+    } catch (_) {}
   };
 
   if (toggleButton) {
@@ -4256,6 +4261,15 @@ async function syncNativeHomescreenWidget(nextEvent, upcomingEvents = []) {
       isSunrise: Boolean(event.isSunrise),
     }));
 
+  let locationTag = "";
+  try {
+    const loc = getEffectiveExportLocation();
+    const name = loc?.locationName;
+    if (name && !isGenericExportLocationName(name)) {
+      locationTag = String(name).trim();
+    }
+  } catch (_) {}
+
   try {
     await widgetPlugin.setNextTiming({
       label: nextEvent.label,
@@ -4266,6 +4280,7 @@ async function syncNativeHomescreenWidget(nextEvent, upcomingEvents = []) {
       widgetCountdownLabel: t("widget.countdown", "Countdown"),
       widgetTimePassedLabel: t("widget.timePassed", "Time passed"),
       widgetNoTimingLabel: t("widget.noTiming", "Open app to load timing"),
+      locationTag: locationTag,
       upcomingEvents: events,
     });
   } catch (error) {

@@ -27,23 +27,23 @@
         <img src="assets/images/eternalagni-icon.png" alt="" class="settings-page-logo" width="52" height="52">
         <div class="settings-page-brand-text">
           <p class="settings-page-eyebrow">EternalAgni</p>
-          <h2>Help &amp; Support</h2>
+          <h2 data-i18n="support.pageTitle">Help &amp; Support</h2>
         </div>
       </a>
-      <p class="section-desc settings-page-desc">Create and send a support report to help us debug customer issues faster.</p>
+      <p class="section-desc settings-page-desc" data-i18n="support.pageDesc">Create and send a support report to help us debug customer issues faster.</p>
     </header>
 
     <section class="support-section-card" aria-labelledby="supportSectionTitle">
       <div class="support-section-header">
         <span class="settings-card-icon settings-card-icon--support" aria-hidden="true"><i class="fa-solid fa-life-ring"></i></span>
         <div class="settings-card-head-text">
-          <h3 id="supportSectionTitle">Support Actions</h3>
-          <p>Send report with logs and diagnostics. Report data is pruned automatically (30 days retention).</p>
+          <h3 id="supportSectionTitle" data-i18n="support.actions.title">Support Actions</h3>
+          <p data-i18n="support.actions.desc">Send report with logs and diagnostics. Report data is pruned automatically (30 days retention).</p>
         </div>
       </div>
       <div class="support-section-actions">
-        <button type="button" id="exportSupportLogsBtn" class="settings-action-btn"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Share Support Report</button>
-        <button type="button" id="emailSupportBtn" class="settings-action-btn settings-action-btn--ghost"><i class="fa-solid fa-envelope" aria-hidden="true"></i> Email Support</button>
+        <button type="button" id="exportSupportLogsBtn" class="settings-action-btn"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> <span data-i18n="support.actions.share">Share Support Report</span></button>
+        <button type="button" id="emailSupportBtn" class="settings-action-btn settings-action-btn--ghost"><i class="fa-solid fa-envelope" aria-hidden="true"></i> <span data-i18n="support.actions.email">Email Support</span></button>
       </div>
       <p id="supportLogExportStatus" class="settings-status" aria-live="polite"></p>
     </section>
@@ -52,19 +52,30 @@
       <div class="support-section-header">
         <span class="settings-card-icon settings-card-icon--time" aria-hidden="true"><i class="fa-solid fa-cloud-arrow-down"></i></span>
         <div class="settings-card-head-text">
-          <h3 id="otaSectionTitle">App updates (test)</h3>
-          <p>Force an update check now, ignoring the once-per-hour limit and the sunrise/sunset pause. New bundles still apply only on the next app restart.</p>
+          <h3 id="otaSectionTitle" data-i18n="support.ota.title">App updates (test)</h3>
+          <p data-i18n="support.ota.desc">Force an update check now, ignoring the once-per-hour limit and the sunrise/sunset pause. New bundles still apply only on the next app restart.</p>
         </div>
       </div>
       <div class="support-section-actions">
-        <button type="button" id="forceOtaUpdateBtn" class="settings-action-btn"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Force update check</button>
+        <button type="button" id="forceOtaUpdateBtn" class="settings-action-btn"><i class="fa-solid fa-rotate" aria-hidden="true"></i> <span data-i18n="support.ota.force">Force update check</span></button>
       </div>
       <p id="otaForceStatus" class="settings-status" aria-live="polite"></p>
     </section>
 
+    <section class="support-section-card" id="latestReleaseSection" aria-labelledby="releaseSectionTitle" hidden>
+      <div class="support-section-header">
+        <span class="settings-card-icon settings-card-icon--time" aria-hidden="true"><i class="fa-solid fa-tag"></i></span>
+        <div class="settings-card-head-text">
+          <h3 id="releaseSectionTitle" data-i18n="support.release.title">Latest Release</h3>
+          <p data-i18n="support.release.desc">The most recent published version of EternalAgni, with notes and a download link.</p>
+        </div>
+      </div>
+      <div id="latestReleaseBody" class="latest-release-body"></div>
+    </section>
+
     <div class="settings-footer-actions">
-      <a href="settings.html" class="btn-primary"><i class="fa-solid fa-gear" aria-hidden="true"></i> Go to Settings</a>
-      <a href="index.html#home" class="btn-primary btn-primary--soft"><i class="fa-solid fa-house" aria-hidden="true"></i> Back to Home</a>
+      <a href="settings.html" class="btn-primary"><i class="fa-solid fa-gear" aria-hidden="true"></i> <span data-i18n="support.gotoSettings">Go to Settings</span></a>
+      <a href="index.html#home" class="btn-primary btn-primary--soft"><i class="fa-solid fa-house" aria-hidden="true"></i> <span data-i18n="nav.backHome">Back to Home</span></a>
     </div>
   </section>
 
@@ -82,8 +93,63 @@
       document.head.appendChild(s);
     })();
   </script>
+  <script src="shared/app/page-i18n.js"></script>
+  <script src="shared/app/latest-release.js"></script>
   <script src="shared/diagnostics/instrumentation.js"></script>
   <script src="shared/diagnostics/payload-builder.js"></script>
   <script src="shared/settings/settings-page.js"></script>
+
+  <script>window.AGNI_ACTIVE_NAV = "more";</script>
+  <nav class="bottom-nav" id="bottomNav" aria-label="Primary">
+    <button type="button" class="bottom-nav-item" data-nav="home">
+      <span class="bottom-nav-icon" aria-hidden="true"><i class="fa-solid fa-house"></i></span>
+      <span class="bottom-nav-label" data-i18n="nav.home">Home</span>
+    </button>
+    <button type="button" class="bottom-nav-item" data-nav="schedule">
+      <span class="bottom-nav-icon" aria-hidden="true"><i class="fa-solid fa-calendar-days"></i></span>
+      <span class="bottom-nav-label" data-i18n="nav.schedule">Schedule</span>
+    </button>
+    <button type="button" class="bottom-nav-item" data-nav="mantras">
+      <span class="bottom-nav-icon" aria-hidden="true"><i class="fa-solid fa-om"></i></span>
+      <span class="bottom-nav-label" data-i18n="nav.mantras">Mantras</span>
+    </button>
+    <button type="button" class="bottom-nav-item" data-nav="settings">
+      <span class="bottom-nav-icon" aria-hidden="true"><i class="fa-solid fa-gear"></i></span>
+      <span class="bottom-nav-label" data-i18n="nav.settings">Settings</span>
+    </button>
+    <button type="button" class="bottom-nav-item" data-nav="more" aria-haspopup="dialog" aria-controls="moreSheet">
+      <span class="bottom-nav-icon" aria-hidden="true"><i class="fa-solid fa-ellipsis"></i></span>
+      <span class="bottom-nav-label" data-i18n="nav.more">More</span>
+    </button>
+  </nav>
+
+  <div class="more-sheet-scrim" id="moreScrim" hidden></div>
+  <div class="more-sheet" id="moreSheet" role="dialog" aria-modal="true" aria-label="More" hidden>
+    <div class="more-sheet-handle" aria-hidden="true"></div>
+    <ul class="more-sheet-list">
+      <li>
+        <a href="index.html#about-agnihotra" class="more-sheet-item">
+          <span class="more-sheet-icon" aria-hidden="true"><i class="fa-solid fa-fire"></i></span>
+          <span class="more-sheet-text" data-i18n="nav.about">About</span>
+        </a>
+      </li>
+      <li>
+        <a href="support.html" class="more-sheet-item">
+          <span class="more-sheet-icon" aria-hidden="true"><i class="fa-solid fa-life-ring"></i></span>
+          <span class="more-sheet-text" data-i18n="nav.support">Support</span>
+        </a>
+      </li>
+    </ul>
+    <div class="more-sheet-lang">
+      <p class="nav-lang-label" data-i18n="nav.language">Language</p>
+      <div class="nav-lang-switcher" aria-label="Language selector">
+        <button type="button" class="lang-option" data-lang="en">English</button>
+        <button type="button" class="lang-option" data-lang="hi">हिन्दी</button>
+        <button type="button" class="lang-option" data-lang="mr">मराठी</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="shared/app/bottom-nav.js"></script>
 </body>
 </html>

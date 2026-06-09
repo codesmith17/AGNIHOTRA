@@ -5,6 +5,8 @@
     <color name="launcher_gold_start">#FFE082</color>
     <color name="launcher_gold_mid">#FFB300</color>
     <color name="launcher_gold_end">#FF8F00</color>
+    <!-- Adaptive launcher background: black to blend with the round logo badge -->
+    <color name="ic_launcher_bg">#000000</color>
 
     <!-- Home-screen widget palette (matches in-app fire / gold theme) -->
     <color name="widget_bg_dark">#0D0402</color>
@@ -19,6 +21,9 @@
     <!-- Sunrise theme: bright gold gradient + warm ember-maroon ink (positive, fiery, high contrast) -->
     <color name="widget_ink">#7A1E0A</color>
     <color name="widget_ink_soft">#A8430F</color>
+    <!-- Location chip ink (distinct accent from the main ink) -->
+    <color name="widget_location">#0E5A66</color>
+    <color name="widget_location_sunset">#FFE3B0</color>
 
     <!-- Sunset theme: dusk gradient (amber -> rose -> violet) + cream ink -->
     <color name="widget_sunset_start">#FFB26B</color>

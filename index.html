@@ -14,8 +14,17 @@
             document.documentElement.classList.add(isNative ? 'agni-platform-native' : 'agni-platform-web');
             window.AgnihotraRuntime = { isNative: isNative, isWeb: !isNative, platform: isNative ? 'native' : 'web' };
             if (isNative) {
-                document.documentElement.classList.add('agni-splash-active');
-                window.AgnihotraSplashStartedAt = Date.now();
+                // Only show the splash on a cold app start. sessionStorage is
+                // cleared when the app process is killed but persists across
+                // in-app page navigations (e.g. Settings -> back to Home), so
+                // returning to this page won't replay the splash.
+                var alreadyShown = false;
+                try { alreadyShown = sessionStorage.getItem('agniSplashShown') === '1'; } catch (e) {}
+                if (!alreadyShown) {
+                    document.documentElement.classList.add('agni-splash-active');
+                    window.AgnihotraSplashStartedAt = Date.now();
+                    try { sessionStorage.setItem('agniSplashShown', '1'); } catch (e) {}
+                }
             }
         })();
     </script>
@@ -86,52 +95,17 @@
         <i class="fas fa-plane-slash"></i> Offline Mode - Using Cached Timings
     </div>
 
-    <nav>
-        <div id="portrait-frame">
-            <img id="portrait" src="assets/images/eternalagni-icon.png" alt="EternalAgni Icon">
-            <h1 id="title">EternalAgni</h1>
+    <nav class="topbar" id="topbar">
+        <div class="topbar-brand">
+            <span class="topbar-logo-ring">
+                <img id="portrait" class="topbar-logo" src="assets/images/eternalagni-icon.png" alt="EternalAgni Icon">
+            </span>
+            <span class="topbar-titles">
+                <span class="topbar-eyebrow">EternalAgni</span>
+                <span class="topbar-page-title" id="topbarPageTitle">Home</span>
+            </span>
         </div>
-        <input type="checkbox" id="nav-check">
-        <div class="nav-icon">
-            <label for="nav-check" class="nav-menu-toggle" id="navMenuToggle" aria-label="Open menu" aria-expanded="false" aria-controls="navMenuPanel">
-                <span class="nav-menu-bar" aria-hidden="true"></span>
-                <span class="nav-menu-bar" aria-hidden="true"></span>
-                <span class="nav-menu-bar" aria-hidden="true"></span>
-            </label>
-        </div>
-        <ul class="nav-links" id="navMenuPanel">
-            <li><a href="#home"><span class="nav-link-icon nav-link-icon--home" aria-hidden="true"><i class="fa-solid fa-house"></i></span><span class="nav-link-text" data-i18n="nav.home">HOME</span></a></li>
-            <li><a href="#about-agnihotra"><span class="nav-link-icon nav-link-icon--about" aria-hidden="true"><i class="fa-solid fa-fire"></i></span><span class="nav-link-text" data-i18n="nav.about">ABOUT</span></a></li>
-            <li><a href="#mantras"><span class="nav-link-icon nav-link-icon--mantras" aria-hidden="true"><i class="fa-solid fa-om"></i></span><span class="nav-link-text" data-i18n="nav.mantras">MANTRAS</span></a></li>
-            <li><a href="#schedule"><span class="nav-link-icon nav-link-icon--schedule" aria-hidden="true"><i class="fa-solid fa-calendar-days"></i></span><span class="nav-link-text" data-i18n="nav.schedule">SCHEDULE</span></a></li>
-            <li><a href="settings.html"><span class="nav-link-icon nav-link-icon--settings" aria-hidden="true"><i class="fa-solid fa-gear"></i></span><span class="nav-link-text">SETTINGS</span></a></li>
-            <li><a href="support.html"><span class="nav-link-icon nav-link-icon--support" aria-hidden="true"><i class="fa-solid fa-life-ring"></i></span><span class="nav-link-text">SUPPORT</span></a></li>
-            <li class="nav-lang-toggle-item">
-                <button id="languageToggle" type="button" class="language-toggle-btn">हिंदी</button>
-            </li>
-            <li class="nav-lang-dropdown-item">
-                <div class="nav-lang-custom" id="navLangCustom">
-                    <button type="button" id="navLangTrigger" class="nav-lang-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="navLangMenu">
-                        <span class="nav-lang-trigger-icon" aria-hidden="true"><i class="fas fa-globe"></i></span>
-                        <span id="navLangTriggerLabel">English</span>
-                        <span class="nav-lang-trigger-chevron" aria-hidden="true"><i class="fas fa-chevron-down"></i></span>
-                    </button>
-                    <ul id="navLangMenu" class="nav-lang-menu hidden" role="listbox" aria-label="Language">
-                        <li><button type="button" class="nav-lang-option" role="option" data-lang="en">English</button></li>
-                        <li><button type="button" class="nav-lang-option" role="option" data-lang="hi">हिन्दी</button></li>
-                        <li><button type="button" class="nav-lang-option" role="option" data-lang="mr">मराठी</button></li>
-                    </ul>
-                </div>
-            </li>
-            <li class="nav-lang-item">
-                <p class="nav-lang-label" data-i18n="nav.language">Language</p>
-                <div class="nav-lang-switcher" aria-label="Language selector">
-                    <button type="button" class="lang-option" data-lang="en">English</button>
-                    <button type="button" class="lang-option" data-lang="hi">हिन्दी</button>
-                    <button type="button" class="lang-option" data-lang="mr">मराठी</button>
-                </div>
-            </li>
-        </ul>
+        <span class="topbar-flame" aria-hidden="true"><i class="fa-solid fa-fire"></i></span>
     </nav>
 
     <header class="hero timings-hero" id="home">
@@ -573,6 +547,216 @@
         <p data-i18n="footer.text">&copy; 2026 EternalAgni. Spreading the Light of Agnihotra.</p>
     </footer>
 
+    <!-- Bottom tab bar (primary navigation) -->
+    <nav class="bottom-nav" id="bottomNav" aria-label="Primary">
+        <button type="button" class="bottom-nav-item is-active" data-nav="home" aria-current="page">
+            <span class="bottom-nav-icon" aria-hidden="true"><i class="fa-solid fa-house"></i></span>
+            <span class="bottom-nav-label" data-i18n="nav.home">Home</span>
+        </button>
+        <button type="button" class="bottom-nav-item" data-nav="schedule">
+            <span class="bottom-nav-icon" aria-hidden="true"><i class="fa-solid fa-calendar-days"></i></span>
+            <span class="bottom-nav-label" data-i18n="nav.schedule">Schedule</span>
+        </button>
+        <button type="button" class="bottom-nav-item" data-nav="mantras">
+            <span class="bottom-nav-icon" aria-hidden="true"><i class="fa-solid fa-om"></i></span>
+            <span class="bottom-nav-label" data-i18n="nav.mantras">Mantras</span>
+        </button>
+        <button type="button" class="bottom-nav-item" data-nav="settings">
+            <span class="bottom-nav-icon" aria-hidden="true"><i class="fa-solid fa-gear"></i></span>
+            <span class="bottom-nav-label" data-i18n="nav.settings">Settings</span>
+        </button>
+        <button type="button" class="bottom-nav-item" data-nav="more" aria-haspopup="dialog" aria-controls="moreSheet">
+            <span class="bottom-nav-icon" aria-hidden="true"><i class="fa-solid fa-ellipsis"></i></span>
+            <span class="bottom-nav-label" data-i18n="nav.more">More</span>
+        </button>
+    </nav>
+
+    <!-- "More" overflow sheet -->
+    <div class="more-sheet-scrim" id="moreScrim" hidden></div>
+    <div class="more-sheet" id="moreSheet" role="dialog" aria-modal="true" aria-label="More" hidden>
+        <div class="more-sheet-handle" aria-hidden="true"></div>
+        <ul class="more-sheet-list">
+            <li>
+                <button type="button" class="more-sheet-item" data-nav="about">
+                    <span class="more-sheet-icon" aria-hidden="true"><i class="fa-solid fa-fire"></i></span>
+                    <span class="more-sheet-text" data-i18n="nav.about">About</span>
+                </button>
+            </li>
+            <li>
+                <a href="support.html" class="more-sheet-item">
+                    <span class="more-sheet-icon" aria-hidden="true"><i class="fa-solid fa-life-ring"></i></span>
+                    <span class="more-sheet-text" data-i18n="nav.support">Support</span>
+                </a>
+            </li>
+        </ul>
+        <div class="more-sheet-lang">
+            <p class="nav-lang-label" data-i18n="nav.language">Language</p>
+            <div class="nav-lang-switcher" aria-label="Language selector">
+                <button type="button" class="lang-option" data-lang="en">English</button>
+                <button type="button" class="lang-option" data-lang="hi">हिन्दी</button>
+                <button type="button" class="lang-option" data-lang="mr">मराठी</button>
+            </div>
+            <button id="languageToggle" type="button" class="language-toggle-btn" hidden>हिंदी</button>
+            <div class="nav-lang-custom" id="navLangCustom" hidden>
+                <button type="button" id="navLangTrigger" class="nav-lang-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="navLangMenu">
+                    <span class="nav-lang-trigger-icon" aria-hidden="true"><i class="fas fa-globe"></i></span>
+                    <span id="navLangTriggerLabel">English</span>
+                    <span class="nav-lang-trigger-chevron" aria-hidden="true"><i class="fas fa-chevron-down"></i></span>
+                </button>
+                <ul id="navLangMenu" class="nav-lang-menu hidden" role="listbox" aria-label="Language">
+                    <li><button type="button" class="nav-lang-option" role="option" data-lang="en">English</button></li>
+                    <li><button type="button" class="nav-lang-option" role="option" data-lang="hi">हिन्दी</button></li>
+                    <li><button type="button" class="nav-lang-option" role="option" data-lang="mr">मराठी</button></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom-tab paging + "More" sheet controller -->
+    <script>
+        (function () {
+            // Group existing sections into top-level "pages".
+            var PAGE_OF = {
+                "home": "home",
+                "today-tomorrow": "home",
+                "about-agnihotra": "about",
+                "materials": "about",
+                "mantras": "mantras",
+                "schedule": "schedule"
+            };
+            var ALL_PAGES = ["home", "about", "mantras", "schedule"];
+
+            function sectionsFor(page) {
+                var ids = [];
+                for (var id in PAGE_OF) {
+                    if (PAGE_OF[id] === page) ids.push(id);
+                }
+                return ids;
+            }
+
+            function showPage(page, opts) {
+                opts = opts || {};
+                if (ALL_PAGES.indexOf(page) === -1) page = "home";
+
+                ALL_PAGES.forEach(function (p) {
+                    var on = p === page;
+                    sectionsFor(p).forEach(function (id) {
+                        var el = document.getElementById(id);
+                        if (el) el.style.display = on ? "" : "none";
+                    });
+                });
+
+                // Tab active state (only for the four in-page tabs).
+                var activeLabel = "";
+                document.querySelectorAll(".bottom-nav-item").forEach(function (btn) {
+                    var nav = btn.getAttribute("data-nav");
+                    var active = nav === page;
+                    btn.classList.toggle("is-active", active);
+                    if (active) {
+                        btn.setAttribute("aria-current", "page");
+                        var lbl = btn.querySelector(".bottom-nav-label");
+                        if (lbl) activeLabel = lbl.textContent.trim();
+                    } else {
+                        btn.removeAttribute("aria-current");
+                    }
+                });
+
+                // Reflect the current page in the top app bar title. Prefer the
+                // already-translated nav label so the title follows the language.
+                var titleEl = document.getElementById("topbarPageTitle");
+                if (titleEl) {
+                    var TITLES = { home: "Home", schedule: "Schedule", mantras: "Mantras", about: "About" };
+                    if (!activeLabel && page === "about") {
+                        var aboutEl = document.querySelector('.more-sheet-item[data-nav="about"] .more-sheet-text');
+                        if (aboutEl) activeLabel = aboutEl.textContent.trim();
+                    }
+                    titleEl.textContent = activeLabel || TITLES[page] || "Home";
+                }
+
+                // Copyright lives on a single page only (About).
+                var footer = document.querySelector("footer");
+                if (footer) footer.style.display = page === "about" ? "" : "none";
+
+                if (!opts.keepScroll) {
+                    window.scrollTo(0, 0);
+                }
+                try {
+                    var hash = "#" + (page === "home" ? "home" : page);
+                    if (location.hash !== hash) history.replaceState(null, "", hash);
+                } catch (e) {}
+                window.AgnihotraCurrentPage = page;
+            }
+            window.AgnihotraShowPage = showPage;
+
+            // --- More sheet ---
+            var moreSheet = document.getElementById("moreSheet");
+            var moreScrim = document.getElementById("moreScrim");
+            function openMore() {
+                if (!moreSheet) return;
+                moreSheet.hidden = false;
+                moreScrim.hidden = false;
+                requestAnimationFrame(function () {
+                    moreSheet.classList.add("is-open");
+                    moreScrim.classList.add("is-open");
+                });
+            }
+            function closeMore() {
+                if (!moreSheet) return;
+                moreSheet.classList.remove("is-open");
+                moreScrim.classList.remove("is-open");
+                setTimeout(function () {
+                    moreSheet.hidden = true;
+                    moreScrim.hidden = true;
+                }, 240);
+            }
+            window.AgnihotraCloseMore = closeMore;
+            if (moreScrim) moreScrim.addEventListener("click", closeMore);
+
+            // --- Bottom nav clicks ---
+            document.querySelectorAll(".bottom-nav-item").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    var nav = btn.getAttribute("data-nav");
+                    if (nav === "settings") { window.location.href = "settings.html"; return; }
+                    if (nav === "more") { openMore(); return; }
+                    closeMore();
+                    showPage(nav);
+                });
+            });
+
+            // More-sheet items that map to in-page pages (e.g. About).
+            document.querySelectorAll(".more-sheet-item[data-nav]").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    var nav = btn.getAttribute("data-nav");
+                    closeMore();
+                    showPage(nav);
+                });
+            });
+
+            function pageFromHash() {
+                var h = (location.hash || "").replace(/^#/, "");
+                if (PAGE_OF[h]) return PAGE_OF[h];
+                if (ALL_PAGES.indexOf(h) !== -1) return h;
+                return "home";
+            }
+
+            window.addEventListener("hashchange", function () {
+                showPage(pageFromHash(), { keepScroll: true });
+            });
+
+            // Refresh the top app bar title when the language changes in place.
+            window.addEventListener("agnihotra:languagechange", function () {
+                showPage(window.AgnihotraCurrentPage || pageFromHash(), { keepScroll: true });
+            });
+
+            function init() { showPage(pageFromHash()); }
+            if (document.readyState === "loading") {
+                document.addEventListener("DOMContentLoaded", init);
+            } else {
+                init();
+            }
+        })();
+    </script>
+
     <script>
         window.AGNI_RUNTIME_CONFIG = {
             enableTestReminder: "__AGNI_ENABLE_TEST_REMINDER__",
@@ -596,8 +780,11 @@
             }
 
             if (!document.documentElement.classList.contains("agni-splash-active")) {
-                document.documentElement.classList.add("agni-splash-active");
-                window.AgnihotraSplashStartedAt = Date.now();
+                // Splash was intentionally skipped (already shown earlier this
+                // app session). Remove it so we don't flash it on in-app
+                // navigations like returning from Settings.
+                splash.remove();
+                return;
             }
             console.info(
                 "[AGNIHOTRA][SPLASH] show " +
