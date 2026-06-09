@@ -5033,6 +5033,22 @@ async function getLocation() {
           return;
         }
 
+        // No cache at all AND offline: nothing in local storage to fall back to,
+        // and we can't reach the network to bootstrap. Ask the user (once) to turn
+        // on the internet so we can detect the location the first time.
+        if (!isEffectivelyOnline() && error?.code !== 1) {
+          setLocationLoading(false);
+          const node = document.getElementById("userLocation");
+          if (node) {
+            node.innerHTML = `
+              <span class="location-card-label">${escapeLocationHtml(t("location.offlineTitle", "You're offline"))}</span>
+              <span class="location-card-primary">${escapeLocationHtml(t("location.offlineNoData", "Turn on the internet once so we can set up your location. After that, the app works fully offline."))}</span>
+            `;
+          }
+          locationLog("offline-no-cache-prompt", { code: error?.code });
+          return;
+        }
+
         if (REQUIRE_MANDATORY_LOCATION_PERMISSION) {
           setLocationLoading(false);
           setPermissionGateVisible(
@@ -5093,8 +5109,56 @@ async function fetchReverseGeocodeAddress(latitude, longitude) {
   }
 }
 
+/** A usable, human address (not the generic coordinate placeholder). */
+function isRealLocationName(name) {
+  const n = String(name || "").trim();
+  return Boolean(n) && !/^gps location detected$/i.test(n);
+}
+
+/**
+ * Offline / no-network address resolution — never hits the network.
+ * Shows the nearest previously-saved named location when the current position
+ * is within LOCATION_NAME_REFRESH_DISTANCE_KM (3 km) of it; otherwise falls back
+ * to raw latitude/longitude so a stale far-away name is never shown.
+ */
+function resolveOfflineLocationDisplay(latitude, longitude) {
+  const coordDetail = `${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)}`;
+  const candidates = [];
+
+  const active = getActiveSavedPlace();
+  if (active && Number.isFinite(active.lat) && Number.isFinite(active.lng)) {
+    candidates.push({
+      name: active.locationName || active.label,
+      detail: active.locationDetail || null,
+      lat: active.lat,
+      lng: active.lng,
+    });
+  }
+  const lastKnown = getLastKnownLocation();
+  if (hasUsableLocationCache(lastKnown)) candidates.push(lastKnown);
+  const snap = getCurrentGpsSnapshot();
+  if (hasUsableLocationCache(snap)) candidates.push(snap);
+
+  for (const c of candidates) {
+    if (!isRealLocationName(c.name && c.name.length ? c.name : c.locationName)) continue;
+    const name = c.name || c.locationName;
+    const detail = c.detail || c.locationDetail || null;
+    const distKm = haversineDistanceKm(latitude, longitude, c.lat, c.lng);
+    if (distKm <= LOCATION_NAME_REFRESH_DISTANCE_KM) {
+      return { label: "Saved Location:", primary: name, secondary: detail || coordDetail, named: true };
+    }
+  }
+
+  // No saved location nearby (or none at all) → show coordinates.
+  return {
+    label: "Your Location:",
+    primary: coordDetail,
+    secondary: t("location.offlineCoords", "Offline · showing coordinates"),
+    named: false,
+  };
+}
+
 async function reverseGeocode(latitude, longitude, skipTimingFetch = false) {
-  const toCoordinateFallback = () => "GPS location detected";
   const startedAt = performance.now();
   debugLog("reverse-geocode:start", { skipTimingFetch });
 
@@ -5113,15 +5177,29 @@ async function reverseGeocode(latitude, longitude, skipTimingFetch = false) {
       elapsedMs: Math.round(performance.now() - startedAt),
     });
   } else {
+    // Offline (or geocode failed): use the saved location within 3 km, else lat/long.
+    const display = resolveOfflineLocationDisplay(latitude, longitude);
+    renderLocationCard({
+      label: display.label,
+      primary: display.primary,
+      secondary: display.secondary,
+    });
     const coordDetail = `${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)}`;
-    const coords = toCoordinateFallback();
-    renderLocationCard({ label: "Your Location:", primary: coords, secondary: coordDetail });
-    saveLastKnownLocation(latitude, longitude, coords, coordDetail);
-    if (!skipTimingFetch) await getSunriseSunset(latitude, longitude, coords);
-    debugLog("reverse-geocode:coord-fallback", {
+    saveLastKnownLocation(
+      latitude,
+      longitude,
+      display.named ? display.primary : null,
+      display.named ? display.secondary : coordDetail
+    );
+    if (!skipTimingFetch) {
+      await getSunriseSunset(latitude, longitude, display.named ? display.primary : null);
+    }
+    debugLog("reverse-geocode:offline-fallback", {
+      named: display.named,
       elapsedMs: Math.round(performance.now() - startedAt),
     });
     locationLog("source-gps-coordinates-fallback", {
+      named: display.named,
       note: "Will retry address when network is back.",
     });
   }
@@ -5245,8 +5323,9 @@ function scheduleAddressEnrichment(delayMs = 1500) {
       // Offline status monitoring
   function updateOnlineStatus() {
     const indicator = document.getElementById('offline-indicator');
+    const online = isEffectivelyOnline();
     if (indicator) {
-      if (isEffectivelyOnline()) {
+      if (online) {
         indicator.style.display = 'none';
         document.body.classList.remove('is-offline');
       } else {
@@ -5254,6 +5333,21 @@ function scheduleAddressEnrichment(delayMs = 1500) {
         document.body.classList.add('is-offline');
       }
     }
+    try {
+      console.info(
+        "[AGNIHOTRA][ONLINE-STATUS] " +
+        JSON.stringify({
+          effectivelyOnline: online,
+          navigatorOnline: navigator.onLine,
+          forcedOffline: Boolean(window.__agnihotraForcedOffline),
+          bodyClass: document.body.className,
+        })
+      );
+    } catch (_) {}
+    // Re-assert layout safety right after the offline class toggles (the offline
+    // banner changes which CSS rules apply — this is where the bottom-nav bug
+    // surfaced). Safe no-op when everything is correct.
+    try { window.AgnihotraEnforceLayoutSafety?.("online-status-change"); } catch (_) {}
   }
 
 window.onload = () => {

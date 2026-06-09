@@ -21,11 +21,25 @@ import android.widget.RemoteViews;
 
 import com.eternalagni.app.MainActivity;
 import com.eternalagni.app.R;
+import com.eternalagni.app.support.AgniLog;
 
 public class AgnihotraWidgetProvider extends AppWidgetProvider {
 
+    private static final String TAG = "AgniWidget";
+
+    // The widget renders as a single FIXED-SIZE card. These values must match the
+    // card dimensions in res/layout/agnihotra_widget_compact.xml and the target
+    // cell sizing in res/xml/agnihotra_widget_info.xml.
+    static final int WIDGET_CARD_WIDTH_DP = 180;
+    static final int WIDGET_CARD_HEIGHT_DP = 100;
+
     @Override
     public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
+        AgniLog.i(context, TAG, "onUpdate ids=" + java.util.Arrays.toString(appWidgetIds));
+        // Force every (including legacy / oversized) placement back to the current
+        // fixed size so an incremental app update always replaces the old widget
+        // footprint with the new one.
+        enforceFixedSize(context, appWidgetManager, appWidgetIds);
         // Render from cached data FIRST so the widget always appears populated,
         // even during the fragile boot-restore window. Doing this before any
         // scheduling work guarantees the widget host never sees a crash/empty
@@ -33,8 +47,21 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
         renderFromCache(context, appWidgetManager, appWidgetIds);
         try {
             AgnihotraWidgetScheduler.refreshAndReschedule(context.getApplicationContext());
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
             // Best-effort: the cached render above keeps the widget visible.
+            AgniLog.w(context, TAG, "onUpdate reschedule failed", t);
+        }
+    }
+
+    @Override
+    public void onRestored(Context context, int[] oldWidgetIds, int[] newWidgetIds) {
+        super.onRestored(context, oldWidgetIds, newWidgetIds);
+        AgniLog.i(context, TAG, "onRestored old=" + java.util.Arrays.toString(oldWidgetIds)
+                + " new=" + java.util.Arrays.toString(newWidgetIds));
+        try {
+            enforceFixedSize(context, AppWidgetManager.getInstance(context), newWidgetIds);
+        } catch (Throwable t) {
+            AgniLog.w(context, TAG, "onRestored enforceFixedSize failed", t);
         }
     }
 
@@ -46,18 +73,64 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
             Bundle newOptions
     ) {
         super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions);
+        if (newOptions != null) {
+            AgniLog.i(context, TAG, "onAppWidgetOptionsChanged id=" + appWidgetId
+                    + " minW=" + newOptions.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, -1)
+                    + " maxW=" + newOptions.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, -1)
+                    + " minH=" + newOptions.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, -1)
+                    + " maxH=" + newOptions.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, -1));
+        }
         try {
             appWidgetManager.updateAppWidget(appWidgetId, buildRemoteViews(context, newOptions));
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            AgniLog.w(context, TAG, "onAppWidgetOptionsChanged update failed id=" + appWidgetId, t);
         }
     }
 
     @Override
     public void onEnabled(Context context) {
         super.onEnabled(context);
+        AgniLog.i(context, TAG, "onEnabled");
         try {
             AgnihotraWidgetScheduler.refreshAndReschedule(context.getApplicationContext());
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            AgniLog.w(context, TAG, "onEnabled reschedule failed", t);
+        }
+    }
+
+    @Override
+    public void onDeleted(Context context, int[] appWidgetIds) {
+        super.onDeleted(context, appWidgetIds);
+        AgniLog.i(context, TAG, "onDeleted ids=" + java.util.Arrays.toString(appWidgetIds));
+    }
+
+    @Override
+    public void onDisabled(Context context) {
+        super.onDisabled(context);
+        AgniLog.i(context, TAG, "onDisabled (last widget removed)");
+    }
+
+    /**
+     * Pins every supplied widget to the fixed card size by overwriting its
+     * min/max width/height options. Most launchers honour these hints and will
+     * snap the host cell down to the new size, so a previously variable-size
+     * (oversized) widget is replaced by the current compact one on update.
+     */
+    private static void enforceFixedSize(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
+        if (appWidgetManager == null || appWidgetIds == null) return;
+        for (int appWidgetId : appWidgetIds) {
+            try {
+                Bundle sizing = new Bundle();
+                sizing.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, WIDGET_CARD_WIDTH_DP);
+                sizing.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, WIDGET_CARD_WIDTH_DP);
+                sizing.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, WIDGET_CARD_HEIGHT_DP);
+                sizing.putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, WIDGET_CARD_HEIGHT_DP);
+                appWidgetManager.updateAppWidgetOptions(appWidgetId, sizing);
+                AgniLog.i(context, TAG, "enforceFixedSize id=" + appWidgetId
+                        + " -> " + WIDGET_CARD_WIDTH_DP + "x" + WIDGET_CARD_HEIGHT_DP + "dp");
+            } catch (Throwable t) {
+                AgniLog.w(context, TAG, "enforceFixedSize failed id=" + appWidgetId, t);
+            }
         }
     }
 
@@ -78,7 +151,11 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
             payload = AgnihotraWidgetStorage.read(context.getApplicationContext());
         } catch (Throwable t) {
             payload = new AgnihotraWidgetStorage.WidgetPayload();
+            AgniLog.w(context, TAG, "renderFromCache read failed; using empty payload", t);
         }
+        AgniLog.i(context, TAG, "renderFromCache ids=" + appWidgetIds.length
+                + " hasTiming=" + payload.hasTiming()
+                + " location=" + payload.locationTag);
 
         for (int appWidgetId : appWidgetIds) {
             try {
@@ -87,7 +164,8 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
                         appWidgetId,
                         buildRemoteViews(context, options, payload)
                 );
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                AgniLog.w(context, TAG, "renderFromCache update failed id=" + appWidgetId, t);
             }
         }
     }
@@ -96,7 +174,12 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
         AppWidgetManager manager = AppWidgetManager.getInstance(context);
         ComponentName provider = new ComponentName(context, AgnihotraWidgetProvider.class);
         int[] appWidgetIds = manager.getAppWidgetIds(provider);
-        if (appWidgetIds == null || appWidgetIds.length == 0) return;
+        if (appWidgetIds == null || appWidgetIds.length == 0) {
+            AgniLog.i(context, TAG, "updateAllWidgets: no widgets placed");
+            return;
+        }
+        AgniLog.i(context, TAG, "updateAllWidgets count=" + appWidgetIds.length);
+        enforceFixedSize(context, manager, appWidgetIds);
 
         AgnihotraWidgetStorage.WidgetPayload payload =
                 AgnihotraWidgetScheduleResolver.resolveAndPersist(context.getApplicationContext());
@@ -122,6 +205,12 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
         // Single polished layout for every size; the sky background is drawn to
         // fit the actual widget dimensions in applySky().
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.agnihotra_widget_compact);
+
+        String state = payload.hasTiming() ? "timing" : (isLoadingState(payload) ? "loading" : "no-timing");
+        AgniLog.i(context, TAG, "buildRemoteViews state=" + state
+                + " label=" + payload.label
+                + " time=" + payload.timeText
+                + " targetMs=" + payload.targetMs);
 
         applySky(context, views, options);
 
@@ -313,14 +402,12 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
         DisplayMetrics dm = context.getResources().getDisplayMetrics();
         float density = dm.density <= 0f ? 2f : dm.density;
 
-        int wDp = 150;
-        int hDp = 56;
-        if (options != null) {
-            int maxW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0);
-            int minH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0);
-            if (maxW > 0) wDp = maxW;
-            if (minH > 0) hDp = minH;
-        }
+        // The card is a FIXED size in the layout (see agnihotra_widget_compact.xml),
+        // so the sky bitmap is always rendered to that fixed size regardless of the
+        // host cell. This keeps oversized legacy placements showing the same compact
+        // card instead of a stretched, blurry gradient.
+        int wDp = WIDGET_CARD_WIDTH_DP;
+        int hDp = WIDGET_CARD_HEIGHT_DP;
 
         int w = Math.max(1, Math.round(wDp * density));
         int h = Math.max(1, Math.round(hDp * density));

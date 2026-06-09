@@ -95,7 +95,10 @@ const filesToCopy = [
 
 // Folders to copy to public directory
 const foldersToCopy = [
-    'api'
+    'api',
+    // Self-hosted third-party assets (Font Awesome, Google Fonts, icono, Sentry)
+    // so icons/fonts render fully offline with no CDN dependency.
+    'assets/vendor'
 ];
 
 // Copy each file

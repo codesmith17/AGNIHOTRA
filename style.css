@@ -81,9 +81,22 @@ nav {
   padding: 0 5%;
 }
 
-/* Shift navigation and content when offline indicator is visible */
-body.is-offline nav {
+/* Shift navigation and content when offline indicator is visible.
+   IMPORTANT: scope this to the TOP navbar only. The bottom tab bar is also a
+   <nav>, and this rule (higher specificity than `.bottom-nav`) would otherwise
+   give it a `top` value while it still has `bottom: 0`, stretching it to full
+   screen height and covering the whole page with its opaque background — the
+   "blank screen when offline" bug. */
+body.is-offline nav:not(.bottom-nav) {
   top: var(--offline-banner-height);
+}
+
+/* Belt-and-suspenders: the bottom tab bar must always hug the bottom edge,
+   regardless of online/offline state. */
+.bottom-nav,
+body.is-offline .bottom-nav {
+  top: auto;
+  bottom: 0;
 }
 
 body.is-offline .hero {
