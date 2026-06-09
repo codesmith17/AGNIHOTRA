@@ -399,9 +399,25 @@ const SUPPORT_SESSION_ID_KEY = "agnihotra_support_session_id_v1";
 const EXPORT_FILE_REGISTRY_KEY = "agnihotra_export_file_registry_v1";
 const EXPORT_NOTIFICATION_CHANNEL_ID = "agnihotra-export-headsup-v5";
 const EXPORT_NATIVE_DIRECTORY = "DATA";
-// Distance the user must move before we refresh the displayed address. Small
-// moves keep the cached name; a real move past this distance re-geocodes.
-const LOCATION_NAME_REFRESH_DISTANCE_KM = 3;
+// ── Location thresholds (kept as THREE distinct, purpose-specific distances) ──
+// Previously a single 3 km value was overloaded for everything, which made the
+// app keep showing a stale place name ("Home") even after you'd driven a couple
+// of km into a different area. These are now separated and sized per Android's
+// official geofencing guidance (GPS ≈ 20–50 m accurate with Wi‑Fi):
+//
+//   • ADDRESS_REFRESH_DISTANCE_KM — how far you move before the DISPLAYED
+//     locality/address is re-fetched. Reverse-geocoding is cheap and cached, so
+//     we refresh after a short, drift-proof move (~400 m) to keep the on-screen
+//     place honest.
+//   • SAVED_PLACE_MATCH_KM — how close you must be to a saved place (Home/Office)
+//     to be counted as "there" and shown its friendly name. ~250 m ≈ a normal
+//     arrival geofence (Android recommends 100–150 m) plus GPS-drift buffer —
+//     NOT a whole town.
+//   • TIMING_REFRESH_DISTANCE_KM — sunrise/sunset barely change over a few km, so
+//     timings are only RECOMPUTED after a genuinely large move (saves battery).
+const ADDRESS_REFRESH_DISTANCE_KM = 0.4;
+const SAVED_PLACE_MATCH_KM = 0.25;
+const TIMING_REFRESH_DISTANCE_KM = 3;
 // How long a cached fix is considered "fresh" enough to PAINT instantly on launch
 // (for perceived speed). GPS still verifies in the background and corrects the
 // address if the user has actually moved past the 100 m threshold above.
@@ -1078,7 +1094,7 @@ async function syncCurrentGpsSnapshotInBackground() {
     const distKm = prior?.lat
       ? haversineDistanceKm(latitude, longitude, prior.lat, prior.lng)
       : Infinity;
-    const moved = distKm > LOCATION_NAME_REFRESH_DISTANCE_KM;
+    const moved = distKm > ADDRESS_REFRESH_DISTANCE_KM;
 
     let locationName = prior?.locationName || null;
     let locationDetail = prior?.locationDetail || null;
@@ -1255,6 +1271,30 @@ async function activateGpsLocationMode() {
 
 function updateLocationPlaceTriggerUI() {
   window.AgnihotraSavedPlaces?.updateLocationPlaceTriggerUI?.(t);
+  updateTimingsForLabel();
+}
+
+/**
+ * Plain-language note that tells the user WHICH location the main countdown is
+ * computed for — a saved place (e.g. "Home") vs. their live GPS position — so a
+ * non-technical user is never confused when the countdown is for Home while they
+ * are physically somewhere else.
+ */
+function updateTimingsForLabel() {
+  const el = document.getElementById("timingsForLabel");
+  if (!el) return;
+  let text;
+  if (isManualSavedPlaceActive()) {
+    const place = getActiveSavedPlace();
+    const name = place?.label || place?.locationName || "";
+    const template = t("places.timingsForPlace", "Timings for {{name}}");
+    text = template.includes("{{name}}")
+      ? template.replace("{{name}}", name)
+      : `${template} ${name}`.trim();
+  } else {
+    text = t("places.timingsForCurrent", "Timings for your current location");
+  }
+  el.textContent = text;
 }
 
 function setupSavedPlacesPicker() {
@@ -1285,7 +1325,7 @@ function haversineDistanceKm(lat1, lng1, lat2, lng2) {
   return 6371 * c;
 }
 
-function getNearbyCachedLocationName(lat, lng, thresholdKm = LOCATION_NAME_REFRESH_DISTANCE_KM) {
+function getNearbyCachedLocationName(lat, lng, thresholdKm = ADDRESS_REFRESH_DISTANCE_KM) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
   const candidates = [];
@@ -1821,7 +1861,7 @@ async function syncNativeWidgetLanguage() {
     await widgetPlugin.setLocalizationStrings({
       widgetTitle: t("widget.title", "EternalAgni"),
       widgetCountdownLabel: "Countdown",
-      widgetTimePassedLabel: t("widget.timePassed", "Time passed"),
+      widgetTimePassedLabel: t("countdown.justPassed", "Agnihotra moment complete"),
       widgetNoTimingLabel: t("widget.noTiming", "Open app to load timing"),
     });
   } catch (error) {
@@ -4278,7 +4318,7 @@ async function syncNativeHomescreenWidget(nextEvent, upcomingEvents = []) {
       isSunrise: Boolean(nextEvent.isSunrise),
       widgetTitle: t("widget.title", "EternalAgni"),
       widgetCountdownLabel: t("widget.countdown", "Countdown"),
-      widgetTimePassedLabel: t("widget.timePassed", "Time passed"),
+      widgetTimePassedLabel: t("countdown.justPassed", "Agnihotra moment complete"),
       widgetNoTimingLabel: t("widget.noTiming", "Open app to load timing"),
       locationTag: locationTag,
       upcomingEvents: events,
@@ -4953,26 +4993,33 @@ async function getLocation() {
         });
 
         // ── STEP 2: distance check vs cached position ──────────────────────
-        // If user has barely moved, keep showing the cached name and timings (no
-        // re-geocode). Only spend network + time on a full refresh once they have
-        // moved past LOCATION_NAME_REFRESH_DISTANCE_KM.
+        // Two independent decisions (so the shown place stays honest without
+        // wasting battery recomputing timings):
+        //   • addressChanged — moved enough (~400 m) that the displayed locality
+        //     could differ, so re-geocode the name.
+        //   • timingsChanged — moved far enough (~3 km) that sunrise/sunset could
+        //     differ, so recompute timings.
         const distFromCache = lastKnown?.lat
           ? haversineDistanceKm(latitude, longitude, lastKnown.lat, lastKnown.lng)
           : Infinity;
-        const locationChanged = distFromCache > LOCATION_NAME_REFRESH_DISTANCE_KM;
+        const addressChanged = distFromCache > ADDRESS_REFRESH_DISTANCE_KM;
+        const timingsChanged = distFromCache > TIMING_REFRESH_DISTANCE_KM;
 
         debugLog("location:distance-check", {
           distKm: Number(distFromCache.toFixed(3)),
-          locationChanged,
-          threshold: LOCATION_NAME_REFRESH_DISTANCE_KM
+          addressChanged,
+          timingsChanged,
+          addressThreshold: ADDRESS_REFRESH_DISTANCE_KM,
+          timingThreshold: TIMING_REFRESH_DISTANCE_KM
         });
         locationLog("distance-check", {
           distKm: Number(distFromCache.toFixed(3)),
-          locationChanged
+          addressChanged,
+          timingsChanged
         });
 
-        if (!locationChanged) {
-          // Same area — keep cached address on screen; only refresh coords in storage.
+        if (!addressChanged && !timingsChanged) {
+          // Barely moved — keep cached address + timings; only refresh coords.
           saveLastKnownLocation(
             latitude,
             longitude,
@@ -4987,12 +5034,12 @@ async function getLocation() {
           return;
         }
 
-        // ── STEP 3: Moved beyond threshold — update silently; keep cache visible until geocode returns ──
-        const timingsPromise = getSunriseSunset(
-          latitude,
-          longitude,
-          lastKnown?.locationName || null
-        );
+        // ── STEP 3: Moved — refresh the shown address; recompute timings only if
+        // the move was large enough to matter. Cache stays visible until the
+        // geocode returns so the UI never flashes blank.
+        const timingsPromise = timingsChanged
+          ? getSunriseSunset(latitude, longitude, lastKnown?.locationName || null)
+          : Promise.resolve();
         await reverseGeocode(latitude, longitude, true);
         await timingsPromise;
       },
@@ -5117,23 +5164,34 @@ function isRealLocationName(name) {
 
 /**
  * Offline / no-network address resolution — never hits the network.
- * Shows the nearest previously-saved named location when the current position
- * is within LOCATION_NAME_REFRESH_DISTANCE_KM (3 km) of it; otherwise falls back
- * to raw latitude/longitude so a stale far-away name is never shown.
+ *  1. If the user has explicitly picked a saved place (Home/Office), show it —
+ *     that's a deliberate choice, so distance is irrelevant.
+ *  2. Otherwise reuse a previously-resolved address ONLY while you're still in
+ *     that spot (within SAVED_PLACE_MATCH_KM ≈ 250 m). A cached name from 1–2 km
+ *     away is no longer where you are, so we fall back to coordinates instead of
+ *     mislabeling the spot (e.g. wrongly showing "Home").
  */
 function resolveOfflineLocationDisplay(latitude, longitude) {
   const coordDetail = `${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)}`;
-  const candidates = [];
 
+  // (1) Explicit manual saved place wins outright.
   const active = getActiveSavedPlace();
-  if (active && Number.isFinite(active.lat) && Number.isFinite(active.lng)) {
-    candidates.push({
-      name: active.locationName || active.label,
-      detail: active.locationDetail || null,
-      lat: active.lat,
-      lng: active.lng,
-    });
+  if (
+    active &&
+    Number.isFinite(active.lat) &&
+    Number.isFinite(active.lng) &&
+    isRealLocationName(active.locationName || active.label)
+  ) {
+    return {
+      label: "Saved Location:",
+      primary: active.locationName || active.label,
+      secondary: active.locationDetail || coordDetail,
+      named: true,
+    };
   }
+
+  // (2) Reuse a cached GPS-derived name only if you're still right there.
+  const candidates = [];
   const lastKnown = getLastKnownLocation();
   if (hasUsableLocationCache(lastKnown)) candidates.push(lastKnown);
   const snap = getCurrentGpsSnapshot();
@@ -5144,8 +5202,8 @@ function resolveOfflineLocationDisplay(latitude, longitude) {
     const name = c.name || c.locationName;
     const detail = c.detail || c.locationDetail || null;
     const distKm = haversineDistanceKm(latitude, longitude, c.lat, c.lng);
-    if (distKm <= LOCATION_NAME_REFRESH_DISTANCE_KM) {
-      return { label: "Saved Location:", primary: name, secondary: detail || coordDetail, named: true };
+    if (distKm <= SAVED_PLACE_MATCH_KM) {
+      return { label: "Your Location:", primary: name, secondary: detail || coordDetail, named: true };
     }
   }
 
