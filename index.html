@@ -183,9 +183,6 @@
                 <ul id="upcomingTimes" class="times-list"></ul>
             </div>
         </div>
-        <a class="hero-scroll-cue" href="#today-tomorrow" aria-label="Scroll to more timings">
-            <i class="fas fa-chevron-down"></i>
-        </a>
     </header>
 
     <section class="timings-secondary" id="today-tomorrow">
@@ -596,6 +593,10 @@
     </footer>
 
     <!-- Bottom tab bar (primary navigation) -->
+    <button type="button" id="scrollToggleBtn" class="scroll-toggle-btn" aria-label="Scroll to bottom">
+        <i class="fas fa-chevron-down" aria-hidden="true"></i>
+    </button>
+
     <nav class="bottom-nav" id="bottomNav" aria-label="Primary">
         <button type="button" class="bottom-nav-item is-active" data-nav="home" aria-current="page">
             <span class="bottom-nav-icon" aria-hidden="true"><i class="fa-solid fa-house"></i></span>
@@ -733,6 +734,9 @@
                     if (location.hash !== hash) history.replaceState(null, "", hash);
                 } catch (e) {}
                 window.AgnihotraCurrentPage = page;
+                if (window.AgnihotraUpdateScrollFab) {
+                    requestAnimationFrame(window.AgnihotraUpdateScrollFab);
+                }
             }
             window.AgnihotraShowPage = showPage;
 
@@ -796,7 +800,44 @@
                 showPage(window.AgnihotraCurrentPage || pageFromHash(), { keepScroll: true });
             });
 
-            function init() { showPage(pageFromHash()); }
+            // --- Floating scroll-to-bottom / back-to-top toggle ---
+            var scrollFab = document.getElementById("scrollToggleBtn");
+            function scrollFabAtBottom() {
+                var doc = document.documentElement;
+                return (window.innerHeight + window.scrollY) >= (doc.scrollHeight - 48);
+            }
+            function updateScrollFab() {
+                if (!scrollFab) return;
+                var doc = document.documentElement;
+                var scrollable = (doc.scrollHeight - window.innerHeight) > 160;
+                if (!scrollable) { scrollFab.classList.remove("is-visible"); return; }
+                scrollFab.classList.add("is-visible");
+                var atBottom = scrollFabAtBottom();
+                var icon = scrollFab.querySelector("i");
+                scrollFab.setAttribute("aria-label", atBottom ? "Scroll to top" : "Scroll to bottom");
+                if (icon) icon.className = atBottom ? "fas fa-chevron-up" : "fas fa-chevron-down";
+            }
+            if (scrollFab) {
+                scrollFab.addEventListener("click", function () {
+                    var toTop = scrollFabAtBottom();
+                    window.scrollTo({
+                        top: toTop ? 0 : document.documentElement.scrollHeight,
+                        behavior: "smooth"
+                    });
+                });
+                window.addEventListener("scroll", updateScrollFab, { passive: true });
+                window.addEventListener("resize", updateScrollFab);
+                window.addEventListener("load", updateScrollFab);
+                window.AgnihotraUpdateScrollFab = updateScrollFab;
+            }
+
+            function init() {
+                showPage(pageFromHash());
+                updateScrollFab();
+                // Home timings render asynchronously and grow the page height, so
+                // re-check a few times to reveal the button once content fills in.
+                [400, 1200, 2500].forEach(function (ms) { setTimeout(updateScrollFab, ms); });
+            }
             if (document.readyState === "loading") {
                 document.addEventListener("DOMContentLoaded", init);
             } else {

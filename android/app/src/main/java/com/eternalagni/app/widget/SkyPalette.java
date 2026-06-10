@@ -29,22 +29,27 @@ public final class SkyPalette {
     // ~45-minute refresh, the colour only ever moves one small step along the
     // curve — a gradual light→medium→deep drift instead of a sudden jump.
     private static final float[] H = {
-            0f, 3f, 5f, 6f, 6.75f, 7.5f, 9f, 11f, 13f, 15f, 16.5f, 17.5f, 18.25f, 19f, 20f, 21.5f, 24f
+            0f, 3f, 5f, 6f, 6.75f, 7.5f, 9f, 11f, 12.5f, 14f, 15.5f, 17f, 18f, 18.75f, 19.5f, 21f, 24f
     };
     // Gradient TOP colours (upper sky) at each anchor. Realistic, desaturated
-    // photographic-sky tones: deep navy night, gentle blues by day, restrained
-    // warmth at the golden hours — no neon / cartoon saturation.
+    // photographic-sky tones with a VISIBLE daily arc: navy night → soft dawn →
+    // fresh morning blue → bright pale midday → warmer afternoon blue → golden →
+    // sunset → rose dusk → night. No neon / cartoon saturation.
+    // Blue peaks at midday (12.5) then the bluishness steadily eases off through
+    // the afternoon — the upper sky shifts from clean blue toward a warmer,
+    // greyer-lavender tone on the way to the golden hour.
     private static final int[] TOP = {
-            0xFF0B1426, 0xFF0C1428, 0xFF1A2A4A, 0xFF3A4E78, 0xFF6E8AB8, 0xFF86A8D0,
-            0xFF6E9AD0, 0xFF5A8FCC, 0xFF4F88C8, 0xFF5689C2, 0xFF6E90BE, 0xFF7C8FB2,
-            0xFF5E6E9A, 0xFF46527E, 0xFF2C3A60, 0xFF16243F, 0xFF0B1426
+            0xFF0B1426, 0xFF0E1730, 0xFF223358, 0xFF46587E, 0xFF6E8AB6, 0xFF83A6CE,
+            0xFF6FA0D6, 0xFF589AD8, 0xFF4F95DA, 0xFF6F95C8, 0xFF8C96B2, 0xFF98909E,
+            0xFF6E7290, 0xFF4C5680, 0xFF303E64, 0xFF182742, 0xFF0B1426
     };
-    // Gradient BOTTOM colours (horizon) at each anchor — softly warmer near
-    // sunrise & sunset, pale haze by day, deep blue at night.
+    // Gradient BOTTOM colours (horizon) at each anchor — warm at sunrise, pale
+    // bright haze at midday, then the blue drains out after noon: neutral pale →
+    // warm cream → amber/orange at sunset, deep blue at night.
     private static final int[] BOT = {
-            0xFF122036, 0xFF13223A, 0xFF2C3C5C, 0xFF7A6E84, 0xFFD69B78, 0xFFEBC79A,
-            0xFFB8D2E8, 0xFFAECBE6, 0xFFA6C6E2, 0xFFACC6DE, 0xFFC9B68C, 0xFFE0A972,
-            0xFFD38A5C, 0xFF9A6E84, 0xFF4E4E72, 0xFF243A56, 0xFF122036
+            0xFF131F38, 0xFF182A48, 0xFF3A4A6E, 0xFF9C7E7A, 0xFFE0A06A, 0xFFF0CE9A,
+            0xFFC2DCEF, 0xFFBAD8EF, 0xFFD2E6F2, 0xFFD2D8D2, 0xFFDCC59A, 0xFFE6AB6E,
+            0xFFD6864F, 0xFFA66E80, 0xFF564E70, 0xFF283E58, 0xFF131F38
     };
 
     private static final int INK_DARK = 0xFF20303F;       // deep slate for bright daytime skies
