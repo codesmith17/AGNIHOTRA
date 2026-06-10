@@ -2,7 +2,6 @@
   const TIME_FORMAT_STORAGE_KEY = "agnihotra_time_format_v1";
   const REMINDER_LEAD_STORAGE_KEY = "agnihotra_reminder_lead_v1";
   const REMINDER_VIBRATE_STORAGE_KEY = "agnihotra_reminder_vibrate_v1";
-  const WATCH_ALERT_STORAGE_KEY = "agnihotra_watch_alert_v1";
   const SUPPORT_LOG_STORAGE_KEY = "agnihotra_support_logs_v1";
   const SUPPORT_LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
   const SUPPORT_EMAIL = "kanchanlatakrishna@gmail.com";
@@ -102,7 +101,6 @@
       timeFormat: getTimeFormat(),
       reminderLeadMinutes: getReminderLeadTime(),
       reminderVibrate: getBooleanSetting(REMINDER_VIBRATE_STORAGE_KEY, true),
-      watchAlert: getBooleanSetting(WATCH_ALERT_STORAGE_KEY, false),
       userAgent: navigator.userAgent,
       platform: navigator.platform || "unknown",
       online: navigator.onLine,
@@ -424,14 +422,6 @@
           await window.AgnihotraNotificationNative.ensureCapacitorChannel();
         }
       },
-    });
-    setupToggleSetting({
-      inputId: "watchAlertToggle",
-      storageKey: WATCH_ALERT_STORAGE_KEY,
-      defaultValue: false,
-      settingName: "watch-alert",
-      savedMessageKey: "settings.status.watchSaved",
-      savedMessageFallback: "Smart watch alert setting saved.",
     });
     const shareBtn = document.getElementById("exportSupportLogsBtn");
     const emailBtn = document.getElementById("emailSupportBtn");
