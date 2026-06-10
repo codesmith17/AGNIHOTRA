@@ -2,7 +2,6 @@
   const shared = window.AgnihotraNotificationShared;
   const REMINDER_LEAD_STORAGE_KEY = "agnihotra_reminder_lead_v1";
   const REMINDER_VIBRATE_STORAGE_KEY = "agnihotra_reminder_vibrate_v1";
-  const WATCH_ALERT_STORAGE_KEY = "agnihotra_watch_alert_v1";
   const DEFAULT_LEAD_MINUTES = 15;
   const STRICT_SCHEDULE_GRACE_MS = 1500;
 
@@ -34,10 +33,6 @@
 
   function isReminderVibrationEnabled() {
     return getBooleanSetting(REMINDER_VIBRATE_STORAGE_KEY, true);
-  }
-
-  function isWatchAlertEnabled() {
-    return getBooleanSetting(WATCH_ALERT_STORAGE_KEY, false);
   }
 
   function getReminderChannelId() {
@@ -210,7 +205,6 @@
           expectedSound: shared.CAPACITOR_NOTIFICATION_SOUND,
           expectedChannelId,
           expectedVibration: vibrationEnabled,
-          expectedWatchAlert: isWatchAlertEnabled(),
           note: "OS handles actual playback policy and may suppress during call/DND.",
         },
         "info"
@@ -254,17 +248,13 @@
     if (!localNotifications) return;
     const reminderChannelId = getReminderChannelId();
     const vibrationEnabled = isReminderVibrationEnabled();
-    const watchAlertEnabled = isWatchAlertEnabled();
     try {
-      // Delete old channels to ensure clean state and single notification behavior
+      // Delete old channels (including the retired watch-nudge channel) to ensure
+      // a clean state and single-notification behavior.
       try {
         const channels = await localNotifications.listChannels();
         for (const ch of channels.channels || []) {
-          if (
-            ch.id.includes("agnihotra") &&
-            ch.id !== reminderChannelId &&
-            ch.id !== shared.CAPACITOR_WEAR_CHANNEL_ID
-          ) {
+          if (ch.id.includes("agnihotra") && ch.id !== reminderChannelId) {
             await localNotifications.deleteChannel({ id: ch.id });
           }
         }
@@ -296,20 +286,6 @@
       } else {
         logVibrate("channel-create-verify-failed", verify, "warn");
       }
-      if (watchAlertEnabled) {
-        await localNotifications.createChannel({
-          id: shared.CAPACITOR_WEAR_CHANNEL_ID,
-          name: "Smart watch alerts",
-          description: "Short companion alerts for connected smart watches",
-          importance: 4,
-          visibility: 1,
-          vibration: true,
-        });
-        logVibrate("wear-channel-create-success", {
-          channelId: shared.CAPACITOR_WEAR_CHANNEL_ID,
-          vibrationRequested: true,
-        });
-      }
     } catch (error) {
       logVibrate(
         "channel-create-failed",
@@ -324,7 +300,7 @@
       window.AgnihotraDiagnostics?.captureException?.(
         error,
         "notify-channel-setup",
-        { channelId: reminderChannelId, vibrationEnabled, watchAlertEnabled }
+        { channelId: reminderChannelId, vibrationEnabled }
       );
     }
   }
@@ -419,7 +395,6 @@
       const currentLeadMinutes = getReminderLeadMinutes();
       const reminderChannelId = getReminderChannelId();
       const vibrationEnabled = isReminderVibrationEnabled();
-      const includeWearNudge = isWatchAlertEnabled();
 
       const now = Date.now();
       const replaceExisting =
@@ -465,31 +440,10 @@
               vibrationEnabled,
             },
           };
-          if (!includeWearNudge) return [primary];
-
-          const wearTag = `wear-${tag}`;
-          const wearNudge = {
-            id: shared.toCapacitorNotificationId(wearTag),
-            title: "Agnihotra",
-            body: event.reminderBody || `${event.label} in ${currentLeadMinutes} minutes.`,
-            schedule: {
-              at: new Date(reminderAt),
-              allowWhileIdle: true,
-            },
-            channelId: shared.CAPACITOR_WEAR_CHANNEL_ID,
-            group: shared.CAPACITOR_NOTIFICATION_GROUP,
-            smallIcon: "ic_stat_notify",
-            iconColor: "#E07B26",
-            extra: {
-              tag: wearTag,
-              eventId: event.id,
-              eventTime,
-              catchUp: false,
-              wearNudge: true,
-              strictLeadMinutes: currentLeadMinutes,
-            },
-          };
-          return [primary, wearNudge];
+          // A connected Wear OS watch automatically mirrors this primary
+          // reminder, so we no longer post a separate companion notification
+          // (it surfaced as a duplicate "Agnihotra" card on the phone).
+          return [primary];
         })
         .filter(Boolean);
 
@@ -545,7 +499,6 @@
           sound: shared.CAPACITOR_NOTIFICATION_SOUND,
           vibration: vibrationEnabled,
           leadMinutes: currentLeadMinutes,
-          includeWearNudge,
           firstTag: notifications[0]?.extra?.tag || null,
         });
         logVibrate("schedule-upcoming", {
@@ -611,7 +564,6 @@
     await ensureCapacitorChannel();
     const reminderChannelId = getReminderChannelId();
     const vibrationEnabled = isReminderVibrationEnabled();
-    const includeWearNudge = isWatchAlertEnabled();
 
     try {
       console.log(`[AGNIHOTRA] scheduleTestReminder native: scheduling at ${scheduleAt.toISOString()} on channel ${reminderChannelId} with sound ${shared.CAPACITOR_NOTIFICATION_SOUND}`);
@@ -628,19 +580,6 @@
         extra: { tag, vibrationEnabled },
       };
       const notifications = [notification];
-      if (includeWearNudge) {
-        notifications.push({
-          id: shared.toCapacitorNotificationId(`wear-${tag}-${Date.now()}`),
-          title: "Agnihotra",
-          body: body || "Reminder check",
-          schedule: { at: scheduleAt, allowWhileIdle: true },
-          channelId: shared.CAPACITOR_WEAR_CHANNEL_ID,
-          group: shared.CAPACITOR_NOTIFICATION_GROUP,
-          smallIcon: "ic_stat_notify",
-          iconColor: "#E07B26",
-          extra: { tag: `wear-${tag}`, wearNudge: true },
-        });
-      }
       console.log(`[AGNIHOTRA] scheduleTestReminder native: notification object: ${JSON.stringify(notification)}`);
       logNotify("schedule-test-native", {
         tag,
@@ -648,7 +587,6 @@
         channelId: reminderChannelId,
         sound: shared.CAPACITOR_NOTIFICATION_SOUND,
         vibration: vibrationEnabled,
-        includeWearNudge,
       });
       await localNotifications.schedule({
         notifications,
