@@ -16,8 +16,26 @@ public final class AgnihotraWidgetStorage {
     private static final String KEY_WIDGET_NO_TIMING_LABEL = "widget_no_timing_label";
     private static final String KEY_UPCOMING_EVENTS_JSON = "upcoming_events_json";
     private static final String KEY_LOCATION_TAG = "location_tag";
+    private static final String KEY_LOCK_COUNTDOWN_ENABLED = "lock_countdown_enabled";
 
     private AgnihotraWidgetStorage() {}
+
+    /** Whether the user enabled the persistent lock-screen / status-bar countdown. */
+    public static boolean isLockCountdownEnabled(Context context) {
+        try {
+            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .getBoolean(KEY_LOCK_COUNTDOWN_ENABLED, false);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static void setLockCountdownEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_LOCK_COUNTDOWN_ENABLED, enabled)
+                .apply();
+    }
 
     public static void saveNextTiming(
             Context context,

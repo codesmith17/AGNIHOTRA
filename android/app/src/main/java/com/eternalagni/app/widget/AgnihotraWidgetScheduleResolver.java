@@ -1,10 +1,15 @@
 package com.eternalagni.app.widget;
 
 import android.content.Context;
+
+import com.eternalagni.app.support.AgniLog;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 public final class AgnihotraWidgetScheduleResolver {
+
+    private static final String TAG = "AgniWidget";
 
     // Mirror the in-app behaviour: after an event fires, keep showing it in a
     // "moment complete" state for this long before advancing to the next event
@@ -17,10 +22,19 @@ public final class AgnihotraWidgetScheduleResolver {
         AgnihotraWidgetStorage.WidgetPayload payload = AgnihotraWidgetStorage.read(context);
         long now = System.currentTimeMillis();
 
+        int eventCount = countEvents(payload.upcomingEventsJson);
+        AgniLog.i(context, TAG, "resolveAndPersist now=" + now
+                + " activeTargetMs=" + payload.targetMs
+                + " activeLabel=" + payload.label
+                + " upcomingEventCount=" + eventCount);
+
         // A freshly-passed event (within the grace window) wins: hold it so the
         // widget shows "moment complete" instead of jumping or counting negative.
         ScheduledEvent justPassed = pickJustPassedEvent(payload.upcomingEventsJson, now);
         if (justPassed != null) {
+            AgniLog.i(context, TAG, "resolve -> JUST_PASSED label=" + justPassed.label
+                    + " targetMs=" + justPassed.targetMs
+                    + " agoMs=" + (now - justPassed.targetMs));
             payload.label = justPassed.label;
             payload.targetMs = justPassed.targetMs;
             payload.timeText = justPassed.timeText;
@@ -32,6 +46,9 @@ public final class AgnihotraWidgetScheduleResolver {
 
         ScheduledEvent next = pickNextEvent(payload.upcomingEventsJson, now);
         if (next != null) {
+            AgniLog.i(context, TAG, "resolve -> NEXT label=" + next.label
+                    + " targetMs=" + next.targetMs
+                    + " inMs=" + (next.targetMs - now));
             payload.label = next.label;
             payload.targetMs = next.targetMs;
             payload.timeText = next.timeText;
@@ -49,15 +66,27 @@ public final class AgnihotraWidgetScheduleResolver {
         // No upcoming-events array: keep the active timing while it's upcoming OR
         // still inside its post-event grace window (so the completed state shows).
         if (payload.hasTiming() && payload.targetMs > now - JUST_PASSED_GRACE_MS) {
+            AgniLog.i(context, TAG, "resolve -> KEEP active timing (no events array); remainingMs="
+                    + (payload.targetMs - now));
             return payload;
         }
 
+        AgniLog.i(context, TAG, "resolve -> CLEAR timing (nothing upcoming, past grace)");
         payload.label = "";
         payload.targetMs = 0L;
         payload.timeText = "";
         payload.isSunrise = true;
         AgnihotraWidgetStorage.clearActiveTiming(context);
         return payload;
+    }
+
+    private static int countEvents(String json) {
+        if (json == null || json.trim().isEmpty()) return 0;
+        try {
+            return new JSONArray(json).length();
+        } catch (Exception ignored) {
+            return -1;
+        }
     }
 
     /** Most recently passed event whose time is still within the grace window. */

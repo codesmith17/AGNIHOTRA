@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Custom notification body for the persistent Agnihotra countdown. Decorated by
+  the system (DecoratedCustomViewStyle), so it keeps the standard header/icon and
+  adaptive theming. Clean typographic hierarchy: a small uppercase eyebrow for
+  context, a light tabular countdown as the hero, and a muted time subline.
+  Only RemoteViews-supported widgets are used; colours come from the system
+  notification text appearances so it stays legible on light and dark shades.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingTop="2dp"
+    android:paddingBottom="3dp">
+
+    <!-- Eyebrow: SUNSET · MUMBAI -->
+    <TextView
+        android:id="@+id/lock_countdown_title"
+        style="@style/TextAppearance.Compat.Notification.Info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:textAllCaps="true"
+        android:letterSpacing="0.12"
+        android:fontFamily="sans-serif-medium"
+        android:text="Sunset" />
+
+    <!-- Hero: live countdown, light weight + tabular figures for a calm, modern feel -->
+    <Chronometer
+        android:id="@+id/lock_countdown_chrono"
+        style="@style/TextAppearance.Compat.Notification.Title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textSize="29sp"
+        android:fontFamily="sans-serif-light"
+        android:fontFeatureSettings="tnum"
+        android:letterSpacing="0.02"
+        android:includeFontPadding="false" />
+
+    <!-- Subline: at 6:40:50 PM -->
+    <TextView
+        android:id="@+id/lock_countdown_at"
+        style="@style/TextAppearance.Compat.Notification.Info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="at 6:40 PM" />
+
+    <!-- Shown instead of the chronometer once the moment has arrived. -->
+    <TextView
+        android:id="@+id/lock_countdown_complete"
+        style="@style/TextAppearance.Compat.Notification.Title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textSize="20sp"
+        android:fontFamily="sans-serif-light"
+        android:maxLines="2"
+        android:visibility="gone"
+        android:text="Agnihotra moment complete" />
+</LinearLayout>

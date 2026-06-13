@@ -163,17 +163,20 @@
         <div class="timings-hero-inner fade-in">
             <p class="hero-eyebrow" data-i18n="hero.title">Agnihotra Timings &amp; Practice</p>
 
-            <button type="button" id="locationPlaceTrigger" class="location-info location-info--hero location-place-trigger location-place-trigger--callout" aria-haspopup="dialog" aria-expanded="false" aria-controls="placePickerSheet" data-i18n-aria="places.triggerAria" aria-label="Location and saved places. Tap to switch.">
-                <span class="location-place-switch-banner">
-                    <span class="location-place-switch-icon" aria-hidden="true"><i class="fas fa-right-left"></i></span>
-                    <span id="locationPlaceHint" class="location-place-hint" data-i18n="places.tapToSwitch">Tap here · switch place</span>
-                    <span class="location-place-chevron" aria-hidden="true"><i class="fas fa-chevron-down"></i></span>
+            <button type="button" id="locationPlaceTrigger" class="location-info location-info--hero location-place-trigger" aria-haspopup="dialog" aria-expanded="false" aria-controls="placePickerSheet" data-i18n-aria="places.triggerAria" aria-label="Location and saved places. Tap to switch.">
+                <span id="locationTriggerIcon" class="location-trigger-pin place-icon--custom" aria-hidden="true"><i class="fa-solid fa-location-crosshairs"></i></span>
+                <span class="location-trigger-body">
+                    <span id="locationPlaceHint" class="location-trigger-eyebrow" data-i18n="places.eyebrowCurrent">Your current location</span>
+                    <div id="locationStatus" class="location-status" aria-live="polite" style="display: none;">
+                        <span class="loading-spinner" aria-hidden="true"></span>
+                        <span id="locationLoadingText" data-i18n="dashboard.detectingLocation">Detecting your location...</span>
+                    </div>
+                    <p id="userLocation"></p>
                 </span>
-                <div id="locationStatus" class="location-status" aria-live="polite" style="display: none;">
-                    <span class="loading-spinner" aria-hidden="true"></span>
-                    <span id="locationLoadingText" data-i18n="dashboard.detectingLocation">Detecting your location...</span>
-                </div>
-                <p id="userLocation"></p>
+                <span class="location-trigger-change" aria-hidden="true">
+                    <span class="location-trigger-change-text" data-i18n="places.change">Change</span>
+                    <i class="fas fa-chevron-right"></i>
+                </span>
             </button>
 
             <div class="card upcoming-times upcoming-times--hero">
@@ -204,6 +207,7 @@
                 <button id="mockReminderBtn" type="button" class="test-reminder-btn test-reminder-btn--secondary">Mock reminder</button>
                 <button id="mockSunriseBtn" type="button" class="test-reminder-btn test-reminder-btn--secondary" data-i18n="notifications.mockSunriseButton">Test sunrise fire in 10s</button>
                 <button id="mockSunsetBtn" type="button" class="test-reminder-btn test-reminder-btn--secondary" data-i18n="notifications.mockSunsetButton">Test sunset fire in 10s</button>
+                <button id="widgetCountdownTestBtn" type="button" class="test-reminder-btn test-reminder-btn--secondary">Test widget countdown 15s</button>
                 <p id="testReminderStatus" class="test-reminder-status"></p>
                 <p id="mockCountdownStatus" class="test-reminder-status"></p>
             </div>
@@ -572,17 +576,16 @@
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            <p class="place-picker-desc" data-i18n="places.subtitle">Switch between saved places (Home, Office, …) for timings and reminders.</p>
-            <p class="place-picker-tip" data-i18n="places.sheetTip">You opened this from the location bar above — switch anytime.</p>
+            <p class="place-picker-desc" data-i18n="places.subtitle">Switch between saved places, or tag where you are now.</p>
             <ul id="placePickerList" class="place-picker-list"></ul>
             <div class="place-picker-actions">
                 <button type="button" id="placePickerAddBtn" class="place-picker-action place-picker-action--primary">
-                    <i class="fas fa-plus"></i>
-                    <span data-i18n="places.saveCurrent">Save current place</span>
+                    <i class="fas fa-location-dot"></i>
+                    <span data-i18n="places.tagCurrent">Tag this location</span>
                 </button>
                 <button type="button" id="placePickerAutoBtn" class="place-picker-action place-picker-action--secondary">
                     <i class="fas fa-crosshairs"></i>
-                    <span data-i18n="places.currentGps">Current location (GPS)</span>
+                    <span data-i18n="places.currentGps">Use current location (GPS)</span>
                 </button>
             </div>
         </div>
@@ -954,7 +957,7 @@
                     }
 
                     if (!bundleLabel) {
-                        bundleLabel = resolveFromConfig() || formatVersionLabel("1.0.4");
+                        bundleLabel = resolveFromConfig() || formatVersionLabel("1.0.7");
                     }
 
                     if (nativeLabel && bundleLabel && nativeLabel !== bundleLabel) {

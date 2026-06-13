@@ -16,12 +16,17 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.util.DisplayMetrics;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.RemoteViews;
 
 import com.eternalagni.app.MainActivity;
 import com.eternalagni.app.R;
 import com.eternalagni.app.support.AgniLog;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class AgnihotraWidgetProvider extends AppWidgetProvider {
 
@@ -31,6 +36,35 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
     // widget's actual cell dimensions yet.
     private static final int DEFAULT_SKY_WIDTH_DP = 180;
     private static final int DEFAULT_SKY_HEIGHT_DP = 80;
+
+    // Reference cell size the base text sizes (below) were designed for. Text is
+    // scaled relative to how much bigger/smaller the actual cell is than this.
+    private static final float REF_WIDTH_DP = 180f;
+    private static final float REF_HEIGHT_DP = 110f;
+
+    // Base text sizes (sp) at the reference cell size; these mirror the values
+    // declared in agnihotra_widget_compact.xml.
+    private static final float BASE_LABEL_SP = 12f;
+    private static final float BASE_LOCATION_SP = 10f;
+    private static final float BASE_COUNTDOWN_SP = 22f;
+    // Base sunrise/sunset icon size (dp) at the reference cell size; mirrors the
+    // 20dp declared in agnihotra_widget_compact.xml.
+    private static final float BASE_ICON_DP = 20f;
+    // Base/min size (sp) for the longer "Agnihotra moment complete" phrase, which
+    // replaces the digit countdown during the moment. Smaller than the countdown
+    // so the full phrase fits (wrapped to two lines) on every phone.
+    private static final float BASE_MOMENT_COMPLETE_SP = 13f;
+    private static final float MIN_MOMENT_COMPLETE_SP = 9f;
+
+    // Keep scaling within sensible bounds so text never disappears or overflows.
+    private static final float MIN_TEXT_SCALE = 0.85f;
+    private static final float MAX_TEXT_SCALE = 2.4f;
+
+    // When the countdown is within this many ms of zero we stop showing the live
+    // chronometer and switch to the "moment complete" text instead. This guards
+    // against the chronometer briefly rendering a negative value if the refresh
+    // that should flip it to the completed state fires a hair late.
+    private static final long COUNTDOWN_PASSED_TOLERANCE_MS = 1_000L;
 
     @Override
     public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
@@ -185,7 +219,8 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
                 + " time=" + payload.timeText
                 + " targetMs=" + payload.targetMs);
 
-        applySky(context, views, options);
+        applySky(context, views, options, payload);
+        applyDynamicTextSizes(views, options);
 
         String location = prettyLocationTag(context, payload.locationTag);
 
@@ -221,7 +256,9 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
 
             bindEventIcon(views, payload.isSunrise);
             bindCountdown(
+                    context,
                     views,
+                    options,
                     payload.targetMs,
                     fallback(payload.widgetTimePassedLabel, context.getString(R.string.widget_countdown_passed))
             );
@@ -355,8 +392,19 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
      * The colour is derived from the exact current time, so it drifts smoothly
      * through the day on each refresh instead of snapping between fixed themes.
      */
-    private static void applySky(Context context, RemoteViews views, Bundle options) {
-        SkyPalette.Sky sky = SkyPalette.now();
+    private static void applySky(
+            Context context,
+            RemoteViews views,
+            Bundle options,
+            AgnihotraWidgetStorage.WidgetPayload payload
+    ) {
+        // Anchor the sky colours to the place's real sun times when known, so the
+        // sunrise/sunset palette tracks the location instead of a fixed 6am/6pm.
+        float sunriseHour = eventHourOfDay(payload, true);
+        float sunsetHour = eventHourOfDay(payload, false);
+        SkyPalette.Sky sky = (sunriseHour > 0f && sunsetHour > 0f)
+                ? SkyPalette.now(sunriseHour, sunsetHour)
+                : SkyPalette.now();
 
         try {
             Bitmap bg = buildSkyBitmap(context, options, sky);
@@ -373,6 +421,94 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
         views.setTextColor(R.id.widget_countdown_chronometer, sky.ink);
         views.setTextColor(R.id.widget_event_time, sky.inkSoft);
         views.setInt(R.id.widget_event_icon, "setColorFilter", sky.ink);
+    }
+
+    /**
+     * Reads the local hour-of-day (0..24) of the soonest upcoming sunrise or
+     * sunset from the cached event list. Sun times drift only minutes day-to-day,
+     * so using the next occurrence is a faithful stand-in for "today's" sun time.
+     * Returns -1 when no matching event is available.
+     */
+    private static float eventHourOfDay(AgnihotraWidgetStorage.WidgetPayload payload, boolean wantSunrise) {
+        if (payload == null) return -1f;
+        String json = payload.upcomingEventsJson;
+        if (json == null || json.trim().isEmpty()) return -1f;
+        try {
+            JSONArray array = new JSONArray(json);
+            long best = Long.MAX_VALUE;
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject item = array.optJSONObject(i);
+                if (item == null) continue;
+                long targetMs = item.optLong("targetMs", 0L);
+                if (targetMs <= 0L) continue;
+                if (item.optBoolean("isSunrise", true) != wantSunrise) continue;
+                if (targetMs < best) best = targetMs;
+            }
+            if (best == Long.MAX_VALUE) return -1f;
+            java.util.Calendar c = java.util.Calendar.getInstance();
+            c.setTimeInMillis(best);
+            return c.get(java.util.Calendar.HOUR_OF_DAY)
+                    + c.get(java.util.Calendar.MINUTE) / 60f
+                    + c.get(java.util.Calendar.SECOND) / 3600f;
+        } catch (Exception ignored) {
+            return -1f;
+        }
+    }
+
+    /**
+     * Scales all widget text relative to the widget's actual cell size so the
+     * countdown, event label and location chip grow when the user enlarges the
+     * widget and shrink when it is made smaller. The scale is derived from how
+     * much bigger/smaller the reported cell is than the reference size and is
+     * clamped to keep text legible at the extremes.
+     */
+    private static void applyDynamicTextSizes(RemoteViews views, Bundle options) {
+        float scale = computeTextScale(options);
+
+        float labelSp = BASE_LABEL_SP * scale;
+        float locationSp = BASE_LOCATION_SP * scale;
+        float countdownSp = BASE_COUNTDOWN_SP * scale;
+
+        views.setTextViewTextSize(R.id.widget_event_label, TypedValue.COMPLEX_UNIT_SP, labelSp);
+        views.setTextViewTextSize(R.id.widget_location_tag, TypedValue.COMPLEX_UNIT_SP, locationSp);
+        views.setTextViewTextSize(R.id.widget_countdown, TypedValue.COMPLEX_UNIT_SP, countdownSp);
+        views.setTextViewTextSize(R.id.widget_countdown_chronometer, TypedValue.COMPLEX_UNIT_SP, countdownSp);
+
+        // Grow/shrink the sunrise/sunset icon to match the cell size. Layout-size
+        // setters on RemoteViews require API 31+; on older devices the icon keeps
+        // its fixed 20dp from the layout.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            float iconDp = BASE_ICON_DP * scale;
+            views.setViewLayoutWidth(R.id.widget_event_icon, iconDp, TypedValue.COMPLEX_UNIT_DIP);
+            views.setViewLayoutHeight(R.id.widget_event_icon, iconDp, TypedValue.COMPLEX_UNIT_DIP);
+        }
+    }
+
+    /**
+     * Computes a single scale factor from the widget's reported cell size. The
+     * smaller of the width/height ratios is used so text fits within both
+     * dimensions, then clamped to {@link #MIN_TEXT_SCALE}..{@link #MAX_TEXT_SCALE}.
+     */
+    private static float computeTextScale(Bundle options) {
+        if (options == null) return 1f;
+
+        int maxW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0);
+        int minW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0);
+        int maxH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0);
+        int minH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0);
+
+        // Use the height the widget will actually occupy and the available width.
+        int wDp = Math.max(maxW, minW);
+        int hDp = Math.max(maxH, minH);
+        if (wDp <= 0 && hDp <= 0) return 1f;
+
+        float wScale = wDp > 0 ? wDp / REF_WIDTH_DP : Float.MAX_VALUE;
+        float hScale = hDp > 0 ? hDp / REF_HEIGHT_DP : Float.MAX_VALUE;
+        float scale = Math.min(wScale, hScale);
+
+        if (scale < MIN_TEXT_SCALE) scale = MIN_TEXT_SCALE;
+        if (scale > MAX_TEXT_SCALE) scale = MAX_TEXT_SCALE;
+        return scale;
     }
 
     private static Bitmap buildSkyBitmap(Context context, Bundle options, SkyPalette.Sky sky) {
@@ -450,15 +586,35 @@ public class AgnihotraWidgetProvider extends AppWidgetProvider {
         return value;
     }
 
-    private static void bindCountdown(RemoteViews views, long targetMs, String passedText) {
-        long remainingMs = targetMs - System.currentTimeMillis();
-        if (remainingMs <= 0L) {
+    private static void bindCountdown(Context context, RemoteViews views, Bundle options, long targetMs, String passedText) {
+        long now = System.currentTimeMillis();
+        long remainingMs = targetMs - now;
+        // Once we're at (or within a hair of) the event, show the static
+        // "moment complete" text rather than a live chronometer that could tick
+        // into negative numbers. The schedule resolver keeps this state for the
+        // grace window and then advances to the next sunrise/sunset.
+        if (remainingMs <= COUNTDOWN_PASSED_TOLERANCE_MS) {
+            AgniLog.i(context, TAG, "bindCountdown -> MOMENT_COMPLETE remainingMs=" + remainingMs
+                    + " targetMs=" + targetMs + " now=" + now
+                    + " toleranceMs=" + COUNTDOWN_PASSED_TOLERANCE_MS);
+            // The completion phrase is much longer than the digit countdown, so
+            // shrink the font (scaled to the widget) and allow it to wrap onto two
+            // centred lines. This keeps "Agnihotra moment complete" fully visible
+            // on every phone/widget size instead of being clipped to one line.
+            float scale = computeTextScale(options);
+            float passedSp = BASE_MOMENT_COMPLETE_SP * scale;
+            if (passedSp < MIN_MOMENT_COMPLETE_SP) passedSp = MIN_MOMENT_COMPLETE_SP;
+            views.setTextViewTextSize(R.id.widget_countdown, TypedValue.COMPLEX_UNIT_SP, passedSp);
+            views.setInt(R.id.widget_countdown, "setMaxLines", 2);
+            views.setInt(R.id.widget_countdown, "setGravity", Gravity.CENTER);
             views.setTextViewText(R.id.widget_countdown, passedText);
             views.setViewVisibility(R.id.widget_countdown, View.VISIBLE);
             views.setViewVisibility(R.id.widget_countdown_chronometer, View.GONE);
             return;
         }
 
+        AgniLog.i(context, TAG, "bindCountdown -> CHRONOMETER remainingMs=" + remainingMs
+                + " targetMs=" + targetMs + " now=" + now);
         long base = SystemClock.elapsedRealtime() + remainingMs;
         views.setViewVisibility(R.id.widget_countdown, View.GONE);
         views.setViewVisibility(R.id.widget_countdown_chronometer, View.VISIBLE);
