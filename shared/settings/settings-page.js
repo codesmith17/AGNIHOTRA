@@ -2,6 +2,7 @@
   const TIME_FORMAT_STORAGE_KEY = "agnihotra_time_format_v1";
   const REMINDER_LEAD_STORAGE_KEY = "agnihotra_reminder_lead_v1";
   const REMINDER_VIBRATE_STORAGE_KEY = "agnihotra_reminder_vibrate_v1";
+  const LOCK_COUNTDOWN_STORAGE_KEY = "agnihotra_lock_countdown_v1";
   const SUPPORT_LOG_STORAGE_KEY = "agnihotra_support_logs_v1";
   const SUPPORT_LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
   const SUPPORT_EMAIL = "kanchanlatakrishna@gmail.com";
@@ -423,6 +424,37 @@
         }
       },
     });
+    setupToggleSetting({
+      inputId: "lockCountdownToggle",
+      storageKey: LOCK_COUNTDOWN_STORAGE_KEY,
+      defaultValue: false,
+      settingName: "lock-countdown",
+      savedMessageKey: "settings.status.lockCountdownSaved",
+      savedMessageFallback: "Lock screen countdown setting saved.",
+      onAfterChange: async (enabled) => {
+        console.log(
+          `[AGNIHOTRA][LOCKCOUNTDOWN] settings-changed ${JSON.stringify({ enabled })}`
+        );
+        const widgetPlugin = window.Capacitor?.Plugins?.AgnihotraWidget;
+        if (widgetPlugin?.setLockScreenCountdown) {
+          await widgetPlugin.setLockScreenCountdown({ enabled });
+        }
+      },
+    });
+    // Reconcile the native flag with the saved JS preference (default OFF). This
+    // clears any stale native state so the countdown notification never shows
+    // unless the user explicitly turned it on.
+    (async () => {
+      try {
+        const enabled = getBooleanSetting(LOCK_COUNTDOWN_STORAGE_KEY, false);
+        const widgetPlugin = window.Capacitor?.Plugins?.AgnihotraWidget;
+        if (widgetPlugin?.setLockScreenCountdown) {
+          await widgetPlugin.setLockScreenCountdown({ enabled });
+        }
+      } catch (error) {
+        console.warn("[AGNIHOTRA][LOCKCOUNTDOWN] init-sync failed", error);
+      }
+    })();
     const shareBtn = document.getElementById("exportSupportLogsBtn");
     const emailBtn = document.getElementById("emailSupportBtn");
     shareBtn?.addEventListener("click", async () => {

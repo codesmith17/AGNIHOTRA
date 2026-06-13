@@ -39,6 +39,71 @@
     return `${shared.CAPACITOR_CHANNEL_ID}-${isReminderVibrationEnabled() ? "vibrate" : "silent"}`;
   }
 
+  // Native plugin that renders reminders with the app's modern notification
+  // theme (custom RemoteViews + DecoratedCustomViewStyle), matching the
+  // lock-screen countdown. When present we post reminders through it instead of
+  // the stock Capacitor render; it posts on the SAME reminder channel created
+  // here, so the configured custom sound / vibration / importance are inherited.
+  function getStyledReminderPlugin() {
+    const plugin = window.Capacitor?.Plugins?.AgnihotraReminder;
+    return plugin && typeof plugin.scheduleStyledReminders === "function"
+      ? plugin
+      : null;
+  }
+
+  function shortEventLabel(event = {}) {
+    const label = String(event.label || "").trim();
+    const lower = label.toLowerCase();
+    if (lower.includes("sunrise")) return "Sunrise";
+    if (lower.includes("sunset")) return "Sunset";
+    return label || "Agnihotra";
+  }
+
+  // Maps an event + lead time onto the styled layout's three-line hierarchy:
+  // a short uppercase eyebrow, a light-weight hero title, and a muted subline.
+  function toStyledReminder(event, id, atMs, leadMinutes) {
+    const label = shortEventLabel(event);
+    const minuteWord = leadMinutes === 1 ? "minute" : "minutes";
+    const heroTitle =
+      event.reminderTitle && event.reminderTitle !== "Agnihotra reminder"
+        ? event.reminderTitle
+        : `Starts in ${leadMinutes} ${minuteWord}`;
+    const body =
+      event.reminderBody || `${label} begins in ${leadMinutes} ${minuteWord}.`;
+    return {
+      id,
+      atMs,
+      eyebrow: `${label} reminder`,
+      title: heroTitle,
+      body,
+    };
+  }
+
+  // Best-effort removal of any pending Capacitor-rendered reminders so the
+  // native styled path never double-posts alongside legacy stock reminders.
+  async function clearPendingCapacitorReminders() {
+    const localNotifications = shared.getCapacitorLocalNotifications();
+    if (!localNotifications) return;
+    try {
+      const pending = await localNotifications.getPending();
+      const toCancel = (pending.notifications || [])
+        .filter((n) => {
+          const tagStr = String(n?.extra?.tag || "");
+          return (
+            n?.group === shared.CAPACITOR_NOTIFICATION_GROUP ||
+            tagStr.includes("native-reminder") ||
+            tagStr.includes("agnihotra")
+          );
+        })
+        .map((n) => ({ id: n.id }));
+      if (toCancel.length > 0) {
+        await localNotifications.cancel({ notifications: toCancel });
+      }
+    } catch (error) {
+      console.warn("Unable to clear pending Capacitor reminders:", error);
+    }
+  }
+
   // Serialize schedule/cancel operations so concurrent callers can't create
   // duplicate notifications (cache-hit path + fast path + background 3-month).
   let schedulingMutex = Promise.resolve();
@@ -369,7 +434,7 @@
             group: shared.CAPACITOR_NOTIFICATION_GROUP,
             sound: shared.CAPACITOR_NOTIFICATION_SOUND,
             smallIcon: "ic_stat_notify",
-            iconColor: "#E07B26",
+            iconColor: "#B87333",
             extra: { tag },
           },
         ],
@@ -401,6 +466,73 @@
         typeof options === "object" ? options?.replaceExisting !== false : true;
       const reminderLeadMs = currentLeadMinutes * 60 * 1000;
 
+      // Preferred path: render reminders natively with the app's notification
+      // theme. Same lead-time math and strict (no catch-up) policy as below.
+      const styledPlugin = getStyledReminderPlugin();
+      if (styledPlugin) {
+        const styledSeen = new Set();
+        const styledReminders = events
+          .flatMap((event) => {
+            const eventTime = Number(event.time);
+            if (!Number.isFinite(eventTime)) return [];
+            const reminderAt = eventTime - reminderLeadMs;
+            if (!Number.isFinite(reminderAt)) return [];
+            if (reminderAt <= now + STRICT_SCHEDULE_GRACE_MS) return [];
+            const tag = `native-reminder-${event.id}-${event.time}-pre${currentLeadMinutes}`;
+            const id = shared.toCapacitorNotificationId(tag);
+            if (styledSeen.has(id)) return [];
+            styledSeen.add(id);
+            return [toStyledReminder(event, id, reminderAt, currentLeadMinutes)];
+          })
+          .filter(Boolean);
+
+        if (styledReminders.length === 0) {
+          try {
+            await styledPlugin.cancelStyledReminders();
+          } catch (_) {}
+          return;
+        }
+
+        await clearPendingCapacitorReminders();
+        try {
+          logNotify("schedule-upcoming-styled", {
+            count: styledReminders.length,
+            channelId: reminderChannelId,
+            vibration: vibrationEnabled,
+            leadMinutes: currentLeadMinutes,
+            firstAt: new Date(styledReminders[0].atMs).toISOString(),
+          });
+          const res = await styledPlugin.scheduleStyledReminders({
+            reminders: styledReminders,
+            channelId: reminderChannelId,
+            vibrate: vibrationEnabled,
+          });
+          window.AgnihotraReminderResilience?.markScheduled?.({
+            count: styledReminders.length,
+            channelId: reminderChannelId,
+            source: "schedule-upcoming-styled",
+          });
+          window.AgnihotraInstrumentation?.recordReminderScheduled?.({
+            count: res?.scheduled ?? styledReminders.length,
+            channelId: reminderChannelId,
+            leadMinutes: currentLeadMinutes,
+            source: "schedule-upcoming-styled",
+            firstAt: new Date(styledReminders[0].atMs).toISOString(),
+            lastAt: new Date(
+              styledReminders[styledReminders.length - 1].atMs
+            ).toISOString(),
+          });
+        } catch (error) {
+          console.warn("Failed to schedule styled reminders:", error);
+          window.AgnihotraDiagnostics?.captureException?.(
+            error,
+            "notify-schedule-upcoming-styled",
+            { count: styledReminders.length }
+          );
+        }
+        return;
+      }
+
       const seenIds = new Set();
       const notifications = events
         .flatMap((event) => {
@@ -430,7 +562,7 @@
             group: shared.CAPACITOR_NOTIFICATION_GROUP,
             sound: shared.CAPACITOR_NOTIFICATION_SOUND,
             smallIcon: "ic_stat_notify",
-            iconColor: "#E07B26",
+            iconColor: "#B87333",
             extra: {
               tag,
               eventId: event.id,
@@ -565,6 +697,45 @@
     const reminderChannelId = getReminderChannelId();
     const vibrationEnabled = isReminderVibrationEnabled();
 
+    // Preferred path: themed native reminder, same look as scheduled reminders.
+    const styledPlugin = getStyledReminderPlugin();
+    if (styledPlugin) {
+      const id = shared.toCapacitorNotificationId(`${tag}-${Date.now()}`);
+      try {
+        logNotify("schedule-test-styled", {
+          tag,
+          scheduleAt: scheduleAt.toISOString(),
+          channelId: reminderChannelId,
+          vibration: vibrationEnabled,
+        });
+        await styledPlugin.scheduleStyledTestReminder({
+          id,
+          atMs: scheduleAt.getTime(),
+          eyebrow: "Agnihotra · Test",
+          title: title || "Test reminder",
+          body: body || "Reminder check",
+          channelId: reminderChannelId,
+          vibrate: vibrationEnabled,
+        });
+        window.AgnihotraInstrumentation?.recordReminderScheduled?.({
+          count: 1,
+          channelId: reminderChannelId,
+          source: "schedule-test-styled",
+          tag,
+          firstAt: scheduleAt.toISOString(),
+          lastAt: scheduleAt.toISOString(),
+        });
+        return true;
+      } catch (error) {
+        console.warn("Failed to schedule styled test reminder:", error);
+        window.AgnihotraDiagnostics?.captureException?.(
+          error,
+          "notify-schedule-test-styled"
+        );
+        // Fall through to the Capacitor path below as a safety net.
+      }
+    }
+
     try {
       console.log(`[AGNIHOTRA] scheduleTestReminder native: scheduling at ${scheduleAt.toISOString()} on channel ${reminderChannelId} with sound ${shared.CAPACITOR_NOTIFICATION_SOUND}`);
       const notification = {
@@ -576,7 +747,7 @@
         group: shared.CAPACITOR_NOTIFICATION_GROUP,
         sound: shared.CAPACITOR_NOTIFICATION_SOUND,
         smallIcon: "ic_stat_notify",
-        iconColor: "#E07B26",
+        iconColor: "#B87333",
         extra: { tag, vibrationEnabled },
       };
       const notifications = [notification];

@@ -31,25 +31,25 @@ public final class SkyPalette {
     private static final float[] H = {
             0f, 3f, 5f, 6f, 6.75f, 7.5f, 9f, 11f, 12.5f, 14f, 15.5f, 17f, 18f, 18.75f, 19.5f, 21f, 24f
     };
-    // Gradient TOP colours (upper sky) at each anchor. Realistic, desaturated
-    // photographic-sky tones with a VISIBLE daily arc: navy night → soft dawn →
-    // fresh morning blue → bright pale midday → warmer afternoon blue → golden →
-    // sunset → rose dusk → night. No neon / cartoon saturation.
-    // Blue peaks at midday (12.5) then the bluishness steadily eases off through
-    // the afternoon — the upper sky shifts from clean blue toward a warmer,
-    // greyer-lavender tone on the way to the golden hour.
+    // Gradient TOP colours (upper sky) at each anchor. Tuned from researched
+    // time-of-day sky palettes for a richer, more photographic daily arc:
+    // deep-navy night → indigo pre-dawn → blue-violet dawn → clean sky blue that
+    // peaks vivid at solar noon → warm lavender afternoon → mauve golden hour →
+    // deep violet sunset → indigo twilight → night. The upper sky stays cooler
+    // than the horizon so sunrise/sunset reads as a warm glow low in the card.
     private static final int[] TOP = {
-            0xFF0B1426, 0xFF0E1730, 0xFF223358, 0xFF46587E, 0xFF6E8AB6, 0xFF83A6CE,
-            0xFF6FA0D6, 0xFF589AD8, 0xFF4F95DA, 0xFF6F95C8, 0xFF8C96B2, 0xFF98909E,
-            0xFF6E7290, 0xFF4C5680, 0xFF303E64, 0xFF182742, 0xFF0B1426
+            0xFF0A1126, 0xFF0C1430, 0xFF202C58, 0xFF405288, 0xFF6E80BC, 0xFF82A8D8,
+            0xFF5E9BDD, 0xFF4189D8, 0xFF2F78D0, 0xFF4A84CC, 0xFF8090BC, 0xFF8C7CA6,
+            0xFF6E5E90, 0xFF4A3E7A, 0xFF2C2A5C, 0xFF162140, 0xFF0A1126
     };
-    // Gradient BOTTOM colours (horizon) at each anchor — warm at sunrise, pale
-    // bright haze at midday, then the blue drains out after noon: neutral pale →
-    // warm cream → amber/orange at sunset, deep blue at night.
+    // Gradient BOTTOM colours (horizon) at each anchor — deep blue night, rosy
+    // dawn blush warming to peach/cream, pale luminous haze through midday, then
+    // the blue drains out after noon into hazy gold, a vivid orange sunset and a
+    // rose-violet dusk before settling back to night.
     private static final int[] BOT = {
-            0xFF131F38, 0xFF182A48, 0xFF3A4A6E, 0xFF9C7E7A, 0xFFE0A06A, 0xFFF0CE9A,
-            0xFFC2DCEF, 0xFFBAD8EF, 0xFFD2E6F2, 0xFFD2D8D2, 0xFFDCC59A, 0xFFE6AB6E,
-            0xFFD6864F, 0xFFA66E80, 0xFF564E70, 0xFF283E58, 0xFF131F38
+            0xFF0E1B34, 0xFF122142, 0xFF3A3C70, 0xFFC77E8A, 0xFFF4A65C, 0xFFFBD89E,
+            0xFFC2E1F2, 0xFFB0D7F0, 0xFF9ECCED, 0xFFB2D0E6, 0xFFDBCBA6, 0xFFEDA968,
+            0xFFF2843A, 0xFFC85E6E, 0xFF6B4A7A, 0xFF34325E, 0xFF0E1B34
     };
 
     private static final int INK_DARK = 0xFF20303F;       // deep slate for bright daytime skies
@@ -59,12 +59,54 @@ public final class SkyPalette {
     private static final int LOC_DARK = 0xFF1C4E80;        // deep sky-blue accent on bright skies
     private static final int LOC_LIGHT = 0xFFB9D4FF;       // icy blue accent on dark skies
 
+    // The hour-of-day the anchor curve is authored around: dawn warms up at ~6:00
+    // and the golden/sunset band sits at ~18:00. When a place's real sunrise and
+    // sunset are known, the actual clock time is warped onto this reference
+    // timeline so the sunrise/sunset colours land at the real sun times instead
+    // of a fixed 6am/6pm.
+    private static final float REF_SUNRISE_HOUR = 6f;
+    private static final float REF_SUNSET_HOUR = 18f;
+
     public static Sky now() {
+        return at(currentHourOfDay());
+    }
+
+    /**
+     * Like {@link #now()} but anchors the dawn/dusk colours to the place's actual
+     * sunrise/sunset (given as local hours-of-day, 0..24). Daytime is stretched or
+     * compressed between the two so e.g. a 7:30pm sunset shows the evening/sunset
+     * palette around 7:30pm rather than at a fixed 6pm. Invalid inputs fall back
+     * to the plain clock curve.
+     */
+    public static Sky now(float sunriseHour, float sunsetHour) {
+        return at(warpHour(currentHourOfDay(), sunriseHour, sunsetHour));
+    }
+
+    private static float currentHourOfDay() {
         Calendar c = Calendar.getInstance();
-        float h = c.get(Calendar.HOUR_OF_DAY)
+        return c.get(Calendar.HOUR_OF_DAY)
                 + c.get(Calendar.MINUTE) / 60f
                 + c.get(Calendar.SECOND) / 3600f;
-        return at(h);
+    }
+
+    /**
+     * Maps a real clock hour onto the reference timeline with three linear
+     * segments that pin local midnight (0/24), the real sunrise to
+     * {@link #REF_SUNRISE_HOUR} and the real sunset to {@link #REF_SUNSET_HOUR}.
+     */
+    static float warpHour(float hour, float sunriseHour, float sunsetHour) {
+        boolean valid = sunriseHour > 0f && sunsetHour > sunriseHour && sunsetHour < 24f;
+        if (!valid) return hour;
+
+        if (hour <= sunriseHour) {
+            return REF_SUNRISE_HOUR * (hour / sunriseHour);
+        }
+        if (hour <= sunsetHour) {
+            float frac = (hour - sunriseHour) / (sunsetHour - sunriseHour);
+            return REF_SUNRISE_HOUR + (REF_SUNSET_HOUR - REF_SUNRISE_HOUR) * frac;
+        }
+        float frac = (hour - sunsetHour) / (24f - sunsetHour);
+        return REF_SUNSET_HOUR + (24f - REF_SUNSET_HOUR) * frac;
     }
 
     public static Sky at(float hour) {

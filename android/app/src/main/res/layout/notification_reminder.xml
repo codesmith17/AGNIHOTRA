@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Custom notification body for ritual reminders. Decorated by the system
+  (DecoratedCustomViewStyle) so it keeps the standard header/icon/colour and
+  adaptive light/dark theming. Shares the calm, modern typographic hierarchy of
+  the lock-screen countdown: a small uppercase letter-spaced eyebrow for
+  context, a light-weight title as the hero line, and a muted supporting line.
+  Only RemoteViews-supported widgets and system text appearances are used so it
+  stays legible on every shade.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingTop="2dp"
+    android:paddingBottom="3dp">
+
+    <!-- Eyebrow: SUNSET REMINDER -->
+    <TextView
+        android:id="@+id/reminder_eyebrow"
+        style="@style/TextAppearance.Compat.Notification.Info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:textAllCaps="true"
+        android:letterSpacing="0.12"
+        android:fontFamily="sans-serif-medium"
+        android:text="Agnihotra reminder" />
+
+    <!-- Hero: light-weight title -->
+    <TextView
+        android:id="@+id/reminder_title"
+        style="@style/TextAppearance.Compat.Notification.Title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:textSize="19sp"
+        android:fontFamily="sans-serif-light"
+        android:letterSpacing="0.01"
+        android:includeFontPadding="false"
+        android:text="Starts soon" />
+
+    <!-- Supporting line: Sunset at 6:40 PM -->
+    <TextView
+        android:id="@+id/reminder_body"
+        style="@style/TextAppearance.Compat.Notification.Info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:maxLines="2"
+        android:ellipsize="end" />
+</LinearLayout>

@@ -419,7 +419,15 @@
     });
 
     return {
-      promptSavePlace({ t, defaultValue = "", locationPreview = "" }) {
+      promptSavePlace({
+        t,
+        defaultValue = "",
+        locationPreview = "",
+        title,
+        hint,
+        confirmText,
+        icon,
+      }) {
         return new Promise((resolve) => {
           resolvePending = resolve;
           mode = "save";
@@ -427,12 +435,14 @@
           bindChips(t);
 
           iconEl.className = "agni-dialog-icon";
-          iconEl.innerHTML = '<i class="fas fa-map-marker-alt"></i>';
-          titleEl.textContent = t("places.saveDialogTitle", "Save this place");
-          messageEl.textContent = t(
-            "places.saveDialogHint",
-            "Give it a name you'll recognize when switching."
-          );
+          iconEl.innerHTML = `<i class="fas ${icon || "fa-map-marker-alt"}"></i>`;
+          titleEl.textContent = title || t("places.saveDialogTitle", "Save this place");
+          messageEl.textContent =
+            hint ||
+            t(
+              "places.saveDialogHint",
+              "Give it a name you'll recognize when switching."
+            );
           setHidden(messageEl, false);
           setHidden(formEl, false);
           setHidden(previewEl, !locationPreview);
@@ -444,7 +454,8 @@
           inputEl.value = defaultValue;
           syncChipSelection(defaultValue);
           cancelBtn.textContent = t("places.dialogCancel", "Cancel");
-          confirmBtn.textContent = t("places.saveDialogConfirm", "Save place");
+          confirmBtn.textContent =
+            confirmText || t("places.saveDialogConfirm", "Save place");
           setHidden(cancelBtn, false);
           confirmBtn.classList.remove("agni-dialog-btn--solo");
 
@@ -550,18 +561,13 @@
     if (hintEl) {
       if (isSavedActive) {
         hintEl.textContent = interpolateTemplate(
-          t("places.tapToChangeNamed", "{{name}} active · tap to switch"),
+          t("places.eyebrowSaved", "Saved place · {{name}}"),
           { name: place.label }
-        );
-      } else if (placesCount > 0) {
-        hintEl.textContent = interpolateTemplate(
-          t("places.tapToSwitchSaved", "Tap here · switch saved place"),
-          { count: placesCount }
         );
       } else {
         hintEl.textContent = t(
-          "places.tapToSwitch",
-          "Tap here · save Home, Office & switch"
+          "places.eyebrowCurrent",
+          "Your current location"
         );
       }
     }
@@ -664,6 +670,9 @@
             </span>
             ${isActive ? '<span class="place-picker-check"><i class="fas fa-check"></i></span>' : ""}
           </button>
+          <button type="button" class="place-picker-edit" data-edit-id="${escapeHtml(place.id)}" aria-label="${escapeHtml(t("places.editAria", "Rename place"))}">
+            <i class="fas fa-pen"></i>
+          </button>
           <button type="button" class="place-picker-delete" data-delete-id="${escapeHtml(place.id)}" aria-label="${escapeHtml(t("places.delete", "Delete place"))}">
             <i class="fas fa-trash-alt"></i>
           </button>
@@ -691,6 +700,43 @@
           if (!place) return;
           setActivePlaceId(place.id);
           await applyPlaceSelection(() => onSelectPlace?.(place));
+        });
+      });
+
+      list.querySelectorAll(".place-picker-edit").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const id = btn.getAttribute("data-edit-id");
+          if (!id) return;
+          const place = getPlaces().find((p) => p.id === id);
+          if (!place) return;
+
+          const preview =
+            place.locationName ||
+            place.locationDetail ||
+            `${Number(place.lat).toFixed(4)}, ${Number(place.lng).toFixed(4)}`;
+          const newLabel = await dialog.promptSavePlace({
+            t,
+            defaultValue: place.label,
+            locationPreview: preview,
+            title: t("places.renameTitle", "Rename place"),
+            hint: t(
+              "places.renameHint",
+              "Update the name for this saved place."
+            ),
+            confirmText: t("places.renameConfirm", "Save name"),
+            icon: "fa-pen",
+          });
+          if (newLabel == null) return;
+
+          const result = updatePlace(id, { label: newLabel });
+          if (!result.ok) return;
+          renderList();
+          // Keep the hero card / timings label in sync if the active place was renamed.
+          if (getActivePlaceId() === id) {
+            await onSelectPlace?.(result.place);
+          }
+          onPlacesChanged?.();
         });
       });
 

@@ -52,6 +52,27 @@ public class AgnihotraWidgetPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setLockScreenCountdown(PluginCall call) {
+        boolean enabled = call.getBoolean("enabled", false);
+        AgnihotraWidgetStorage.setLockCountdownEnabled(getContext(), enabled);
+        // Refresh drives LockCountdownNotifier.update(), which posts the ongoing
+        // countdown when enabled or cancels it when disabled.
+        AgnihotraWidgetScheduler.refreshAndReschedule(getContext());
+
+        JSObject result = new JSObject();
+        result.put("ok", true);
+        result.put("enabled", enabled);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void getLockScreenCountdown(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("enabled", AgnihotraWidgetStorage.isLockCountdownEnabled(getContext()));
+        call.resolve(result);
+    }
+
+    @PluginMethod
     public void setLocalizationStrings(PluginCall call) {
         String widgetTitle = call.getString("widgetTitle", "");
         String widgetCountdownLabel = call.getString("widgetCountdownLabel", "");

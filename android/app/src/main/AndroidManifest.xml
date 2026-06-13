@@ -55,6 +55,18 @@
         </receiver>
 
         <receiver
+            android:name=".widget.LockCountdownDismissReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".ReminderAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.eternalagni.app.action.REMINDER_FIRE" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
             android:name=".ReminderBootReceiver"
             android:exported="false">
             <intent-filter>

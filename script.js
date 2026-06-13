@@ -1168,6 +1168,25 @@ function setLocationCardUpdating(isUpdating) {
   userLocationNode.classList.toggle("location-card--updating", Boolean(isUpdating));
 }
 
+/**
+ * Sets the round icon at the start of the hero location row. GPS mode uses a
+ * crosshair; a saved place uses its themed icon (Home/Office/Temple/custom) so
+ * the icon, eyebrow and address always describe the same place.
+ */
+function applyLocationTriggerIcon(iconMeta) {
+  const pin = document.getElementById("locationTriggerIcon");
+  if (!pin) return;
+  const meta = iconMeta || {
+    iconStyle: "fa-solid",
+    icon: "fa-location-crosshairs",
+    toneClass: "place-icon--custom",
+  };
+  pin.className = `location-trigger-pin ${meta.toneClass || "place-icon--custom"}`;
+  pin.innerHTML =
+    window.AgnihotraSavedPlaces?.renderPlaceIconHtml?.(meta) ||
+    `<i class="${meta.iconStyle || "fa-solid"} ${meta.icon || "fa-location-crosshairs"}" aria-hidden="true"></i>`;
+}
+
 function renderSavedPlaceLocationCard(place) {
   const userLocationNode = document.getElementById("userLocation");
   if (!place || !userLocationNode) return;
@@ -1178,37 +1197,26 @@ function renderSavedPlaceLocationCard(place) {
       icon: "fa-location-dot",
       toneClass: "place-icon--custom",
     };
-  const iconHtml =
-    window.AgnihotraSavedPlaces?.renderPlaceIconHtml?.(iconMeta) ||
-    '<i class="fa-solid fa-location-dot" aria-hidden="true"></i>';
+  applyLocationTriggerIcon(iconMeta);
+
   const address =
     window.AgnihotraSavedPlaces?.formatPlaceAddressCard?.(place) || {
       labelText: place.label,
       primary: place.locationName || place.label,
       secondary: place.locationDetail || "",
     };
-  const cardLabel = interpolateTemplate(
-    t("places.cardLabel", "Place: {{name}}"),
-    { name: address.labelText }
-  );
   const detailParts = String(address.secondary || "")
     .split(" • ")
     .map((part) => part.trim())
     .filter(Boolean);
 
   userLocationNode.innerHTML = `
-    <div class="location-saved-row">
-      <span class="location-place-icon ${iconMeta.toneClass}" aria-hidden="true">${iconHtml}</span>
-      <div class="location-saved-body">
-        <span class="location-card-label">${escapeLocationHtml(cardLabel)}</span>
-        <span class="location-card-primary">${escapeLocationHtml(address.primary)}</span>
-        ${
-          detailParts.length
-            ? `<span class="location-card-details">${escapeLocationHtml(detailParts.join(" • "))}</span>`
-            : ""
-        }
-      </div>
-    </div>
+    <span class="location-card-primary">${escapeLocationHtml(address.primary || place.label)}</span>
+    ${
+      detailParts.length
+        ? `<span class="location-card-details">${escapeLocationHtml(detailParts.join(" • "))}</span>`
+        : ""
+    }
   `;
   updateLocationPlaceTriggerUI();
 }
@@ -1976,7 +1984,8 @@ function setupTestReminderButton() {
   const mockSunriseBtn = document.getElementById("mockSunriseBtn");
   const mockSunsetBtn = document.getElementById("mockSunsetBtn");
   const mockReminderBtn = document.getElementById("mockReminderBtn");
-  if (!button && !mockSunriseBtn && !mockSunsetBtn && !mockReminderBtn) return;
+  const widgetCountdownTestBtn = document.getElementById("widgetCountdownTestBtn");
+  if (!button && !mockSunriseBtn && !mockSunsetBtn && !mockReminderBtn && !widgetCountdownTestBtn) return;
   if (!isTestReminderEnabled()) {
     if (wrap) wrap.style.display = "none";
     return;
@@ -2006,6 +2015,65 @@ function setupTestReminderButton() {
       initAudio();
       runMockReminderTest(15);
     });
+  }
+  if (widgetCountdownTestBtn) {
+    widgetCountdownTestBtn.addEventListener("click", () => {
+      runWidgetCountdownTest(15);
+    });
+  }
+}
+
+// Pushes a short, synthetic schedule to the home-screen widget so the countdown
+// rollover can be verified: the widget should tick down to zero, show the
+// "Agnihotra moment complete" state for the grace window, then advance to the
+// next event — and never display a negative timer.
+async function runWidgetCountdownTest(seconds = 15) {
+  const safeSeconds = Math.max(5, Number(seconds) || 15);
+
+  if (!isNativeAppRuntime()) {
+    setMockCountdownStatus("Widget countdown test only runs in the installed Android app.");
+    return;
+  }
+  const widgetPlugin = window.Capacitor?.Plugins?.AgnihotraWidget;
+  if (!widgetPlugin?.setNextTiming) {
+    setMockCountdownStatus("Widget plugin unavailable on this device.");
+    return;
+  }
+
+  const now = Date.now();
+  const firstMs = now + safeSeconds * 1000;
+  // Push ONE synthetic event so the test fires exactly once, followed by the
+  // REAL upcoming events. The widget counts down to the synthetic event, shows
+  // "Agnihotra moment complete" for the grace window, then — because the real
+  // events are included — automatically rolls over to the next genuine
+  // sunrise/sunset instead of falling back to "Open app to load timing".
+  // (The real events are hours away, so there is no repeated 15s cycle.)
+  const event = { label: "Test Sunset", time: firstMs, isSunrise: false };
+
+  let realUpcoming = [];
+  try {
+    const cached = getCachedTodayTomorrowRows();
+    if (cached) {
+      realUpcoming = buildWidgetUpcomingEvents(cached.todayRow, cached.tomorrowRow)
+        .filter((e) => e && Number.isFinite(e.time) && e.time > firstMs);
+    }
+  } catch (_) {}
+
+  try {
+    await syncNativeHomescreenWidget(event, [event, ...realUpcoming]);
+    const rollover = realUpcoming.length
+      ? ` then roll over to "${realUpcoming[0].label}".`
+      : ".";
+    setMockCountdownStatus(
+      `Widget countdown set to ${safeSeconds}s (once). Watch the home-screen widget: it should reach 0, show "Agnihotra moment complete"${rollover}`
+    );
+    console.log(`[AGNIHOTRA][WIDGET] countdown-test pushed ${serializeForConsole({
+      seconds: safeSeconds,
+      firstMs,
+    })}`);
+  } catch (error) {
+    console.warn("[AGNIHOTRA][WIDGET] countdown-test-failed", error);
+    setMockCountdownStatus("Failed to push widget countdown test.");
   }
 }
 
@@ -4326,6 +4394,18 @@ async function syncNativeHomescreenWidget(nextEvent, upcomingEvents = []) {
   } catch (error) {
     console.warn("[AGNIHOTRA][WIDGET] sync-failed", error);
   }
+
+  // Reconcile the optional lock-screen countdown with the saved preference
+  // (default OFF) on every sync, so a stale native flag never keeps the
+  // notification showing unless the user explicitly enabled it.
+  try {
+    if (widgetPlugin?.setLockScreenCountdown) {
+      const lockEnabled =
+        String(localStorage.getItem("agnihotra_lock_countdown_v1") || "")
+          .toLowerCase() === "true";
+      await widgetPlugin.setLockScreenCountdown({ enabled: lockEnabled });
+    }
+  } catch (_) {}
 }
 
 // Helper function to parse date and time into timestamp
@@ -4855,6 +4935,11 @@ function paintCachedGpsLocation(lastKnown) {
 function renderLocationCard({ label = "", primary = "", secondary = "" } = {}) {
   const userLocationNode = document.getElementById("userLocation");
   if (!userLocationNode) return;
+  applyLocationTriggerIcon({
+    iconStyle: "fa-solid",
+    icon: "fa-location-crosshairs",
+    toneClass: "place-icon--custom",
+  });
   const detailParts = String(secondary || "")
     .split(" • ")
     .map((part) => part.trim())

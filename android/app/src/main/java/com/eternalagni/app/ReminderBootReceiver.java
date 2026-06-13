@@ -76,5 +76,14 @@ public class ReminderBootReceiver extends BroadcastReceiver {
                 // Widget refresh is best-effort until the app syncs timings again.
             }
         }
+
+        // Re-arm the natively-rendered ritual reminders from their persisted
+        // schedule. AlarmManager alarms are cleared on reboot, so without this
+        // the next reminder would be lost until the app is reopened.
+        try {
+            StyledReminderScheduler.rescheduleFromStorage(context.getApplicationContext());
+        } catch (Throwable ignored) {
+            // Best-effort; JS rebuilds the full schedule on next launch.
+        }
     }
 }

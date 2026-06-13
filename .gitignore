@@ -39,6 +39,10 @@ script2.js
 .DS_Store
 Thumbs.db
 
+# Stray third-party installers
+logioptionsplus_installer.app/
+logioptionsplus_installer.zip
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
