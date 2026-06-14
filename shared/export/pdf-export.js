@@ -562,8 +562,11 @@
   }
 
   const SCHEDULE_HEADER_HEIGHT = 16;
-  const SCHEDULE_MONTH_HEIGHT = 13;
-  const SCHEDULE_ROW_HEIGHT = 13;
+  // Row/month-header heights are computed dynamically per export so the table
+  // fills the page (no large blank areas) while staying readable.
+  const SCHEDULE_MIN_ROW = 12;
+  const SCHEDULE_MAX_ROW = 24;
+  const SCHEDULE_TARGET_ROW = 19;
 
   function drawScheduleMiniHeader(doc, startX, startY, columnWidths, pdfText) {
     const headerHeight = SCHEDULE_HEADER_HEIGHT;
@@ -599,21 +602,21 @@
     );
   }
 
-  function drawMiniMonthHeader(doc, label, startX, y, width) {
+  function drawMiniMonthHeader(doc, label, startX, y, width, height) {
     doc.setFillColor(249, 240, 224);
-    doc.roundedRect(startX, y, width, SCHEDULE_MONTH_HEIGHT, 3, 3, "F");
+    doc.roundedRect(startX, y, width, height, 3, 3, "F");
     doc.setDrawColor(210, 171, 126);
     doc.setLineWidth(0.4);
-    doc.roundedRect(startX, y, width, SCHEDULE_MONTH_HEIGHT, 3, 3);
+    doc.roundedRect(startX, y, width, height, 3, 3);
+    const fontSize = Math.max(7.5, Math.min(10.5, height * 0.5));
     doc.setFont("helvetica", "bold");
     doc.setTextColor(120, 73, 42);
-    doc.setFontSize(8.4);
-    doc.text(label, startX + 7, y + 9);
+    doc.setFontSize(fontSize);
+    doc.text(label, startX + 8, y + height / 2 + fontSize * 0.34);
   }
 
-  function drawScheduleRow(doc, startX, y, columnWidths, row, zebra) {
+  function drawScheduleRow(doc, startX, y, columnWidths, row, zebra, rowHeight) {
     const totalW = columnWidths[0] + columnWidths[1] + columnWidths[2];
-    const rowHeight = SCHEDULE_ROW_HEIGHT;
     if (zebra) {
       doc.setFillColor(251, 246, 237);
       doc.rect(startX, y, totalW, rowHeight, "F");
@@ -632,10 +635,11 @@
       startX + columnWidths[0] + columnWidths[1],
       y + rowHeight
     );
+    const fontSize = Math.max(7, Math.min(11, rowHeight * 0.5));
+    const textY = y + rowHeight / 2 + fontSize * 0.34;
     doc.setTextColor(55, 43, 33);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(7.8);
-    const textY = y + 9;
+    doc.setFontSize(fontSize);
     doc.text(formatDateIndian(row.date), startX + columnWidths[0] / 2, textY, {
       align: "center",
     });
@@ -653,6 +657,97 @@
       textY,
       { align: "center" }
     );
+  }
+
+  // Plans how the schedule rows are laid out so every page fills nicely:
+  // - short ranges use ONE wide column (and short tables are centered);
+  // - long ranges use TWO columns for density;
+  // - rows are spread EVENLY across columns/pages (no near-empty last page);
+  // - row height is scaled to fill the available height.
+  function planSchedule(rows, usableH) {
+    const items = [];
+    let curKey = null;
+    rows.forEach((row) => {
+      const d = parseRowDate(row.date);
+      const key = d ? `${d.getFullYear()}-${d.getMonth()}` : `u-${row.date}`;
+      if (key !== curKey) {
+        items.push({ type: "month", label: formatMonthHeading(d), key });
+        curKey = key;
+      }
+      items.push({ type: "row", row, key });
+    });
+
+    const total = items.length;
+    const maxPerColMin = Math.max(1, Math.floor(usableH / SCHEDULE_MIN_ROW));
+    const onePageComfort = Math.max(1, Math.floor(usableH / SCHEDULE_TARGET_ROW));
+
+    let columnsPerPage;
+    let pages;
+    if (total <= onePageComfort) {
+      columnsPerPage = 1;
+      pages = 1;
+    } else {
+      const pagesSingle = Math.ceil(total / maxPerColMin);
+      if (pagesSingle <= 2) {
+        columnsPerPage = 1;
+        pages = pagesSingle;
+      } else {
+        columnsPerPage = 2;
+        pages = Math.ceil(total / (2 * maxPerColMin));
+      }
+    }
+
+    const columnsTotal = Math.max(1, pages * columnsPerPage);
+
+    // Distribute items into columns of at most `perCol` slots, repeating the
+    // month header whenever a month continues into a new column.
+    const distribute = (perCol) => {
+      const columns = [];
+      let col = [];
+      let lastMonth = null;
+      const flush = () => {
+        if (col.length) {
+          columns.push(col);
+          col = [];
+        }
+      };
+      items.forEach((it) => {
+        if (it.type === "month") {
+          // Don't strand a month header at the very bottom of a column.
+          if (col.length > 0 && col.length >= perCol - 1) flush();
+          lastMonth = { label: it.label, key: it.key };
+          col.push(it);
+        } else {
+          if (col.length >= perCol) {
+            flush();
+            if (lastMonth) {
+              col.push({ type: "month", label: lastMonth.label, key: lastMonth.key, repeat: true });
+            }
+          }
+          col.push(it);
+        }
+      });
+      flush();
+      return columns;
+    };
+
+    // The repeated month headers add items beyond `total`, which can spill into
+    // an extra, near-empty column/page. Grow `perCol` until everything fits in
+    // the planned number of columns so the pages stay balanced.
+    let perCol = Math.max(1, Math.ceil(total / columnsTotal));
+    let columns = distribute(perCol);
+    while (columns.length > columnsTotal && perCol < maxPerColMin) {
+      perCol += 1;
+      columns = distribute(perCol);
+    }
+
+    const maxItems = columns.reduce((m, c) => Math.max(m, c.length), 1);
+    const rowHeight = Math.min(
+      SCHEDULE_MAX_ROW,
+      Math.max(SCHEDULE_MIN_ROW, usableH / maxItems)
+    );
+
+    return { columns, columnsPerPage, rowHeight };
   }
 
   function drawFooter(doc, pageNumber, pageWidth, pageHeight) {
@@ -729,19 +824,24 @@
     const tableStartX = 36;
     const tableStartY = 178;
     const tableTotalWidth = pageWidth - 72;
-    const columnGap = 14;
-    const miniWidth = Math.floor((tableTotalWidth - columnGap) / 2);
-    const dateColWidth = 64;
-    const timeColWidth = Math.floor((miniWidth - dateColWidth) / 2);
-    const miniColumnWidths = [
-      dateColWidth,
-      timeColWidth,
-      miniWidth - dateColWidth - timeColWidth,
-    ];
-    const leftX = tableStartX;
-    const rightX = tableStartX + miniWidth + columnGap;
-    const scheduleBodyStartY = tableStartY + SCHEDULE_HEADER_HEIGHT + 6;
+    const columnGap = 16;
+    const scheduleBodyStartY = tableStartY + SCHEDULE_HEADER_HEIGHT + 8;
     const scheduleBottomLimit = pageHeight - 64;
+    const usableH = scheduleBottomLimit - scheduleBodyStartY;
+
+    // Plan the layout up front so pages fill nicely across any date range.
+    const { columns, columnsPerPage, rowHeight } = planSchedule(rows, usableH);
+    const colWidth =
+      columnsPerPage === 1
+        ? tableTotalWidth
+        : Math.floor((tableTotalWidth - columnGap) / 2);
+    const dateColW = Math.round(colWidth * 0.3);
+    const sunriseColW = Math.round(colWidth * 0.35);
+    const columnWidths = [dateColW, sunriseColW, colWidth - dateColW - sunriseColW];
+    const columnXs =
+      columnsPerPage === 1
+        ? [tableStartX]
+        : [tableStartX, tableStartX + colWidth + columnGap];
 
     drawCoverPage(doc, meta, pageWidth, pageHeight, assets, pdfText);
     let pageNumber = 1;
@@ -752,12 +852,7 @@
     drawHowToPage(doc, pageWidth, pageHeight, meta, assets, pdfText);
     drawFooter(doc, pageNumber, pageWidth, pageHeight);
 
-    // We only draw the left mini-header up front. The right mini-header is
-    // drawn lazily the first time we actually advance into the right column —
-    // this keeps the page clean (no empty "Date | Sunrise | Sunset" strip on
-    // the right) for short ranges that fit entirely in the left column.
-    let rightHeaderDrawnOnThisPage = false;
-    const beginSchedulePage = () => {
+    const startSchedulePage = () => {
       doc.addPage();
       pageNumber += 1;
       drawPaperBackground(doc, pageWidth, pageHeight);
@@ -770,82 +865,43 @@
         "Ritual Timings Schedule",
         pdfText
       );
-      drawScheduleMiniHeader(doc, leftX, tableStartY, miniColumnWidths, pdfText);
-      rightHeaderDrawnOnThisPage = false;
     };
 
-    beginSchedulePage();
+    // A short, single-column schedule is centered vertically so the page reads
+    // as intentional instead of empty at the bottom.
+    const singleColumn = columns.length === 1;
 
-    let currentCol = "left";
-    let cursorY = scheduleBodyStartY;
-    let currentMonthKey = "";
-    let rowZebraCounter = 0;
-    const colX = () => (currentCol === "left" ? leftX : rightX);
-    const advanceColumnOrPage = () => {
-      if (currentCol === "left") {
-        if (!rightHeaderDrawnOnThisPage) {
-          drawScheduleMiniHeader(
-            doc,
-            rightX,
-            tableStartY,
-            miniColumnWidths,
-            pdfText
-          );
-          rightHeaderDrawnOnThisPage = true;
-        }
-        currentCol = "right";
-      } else {
-        drawFooter(doc, pageNumber, pageWidth, pageHeight);
-        beginSchedulePage();
-        currentCol = "left";
+    columns.forEach((column, colIndex) => {
+      const slotOnPage = colIndex % columnsPerPage;
+      if (slotOnPage === 0) {
+        if (colIndex > 0) drawFooter(doc, pageNumber, pageWidth, pageHeight);
+        startSchedulePage();
       }
-      cursorY = scheduleBodyStartY;
-    };
+      const x = columnXs[slotOnPage];
+      const contentH = column.length * rowHeight;
+      const bodyTop = singleColumn
+        ? scheduleBodyStartY + Math.max(0, (usableH - contentH) / 2)
+        : scheduleBodyStartY;
 
-    rows.forEach((row, index) => {
-      const rowDate = parseRowDate(row.date);
-      const monthLabel = formatMonthHeading(rowDate);
-      const monthKey = rowDate
-        ? `${rowDate.getFullYear()}-${rowDate.getMonth()}`
-        : `unknown-${String(row.date || index)}`;
-
-      // A month transition needs its label + at least one row of context to
-      // avoid an orphaned heading at the end of a column.
-      if (monthKey !== currentMonthKey) {
-        if (
-          cursorY + SCHEDULE_MONTH_HEIGHT + SCHEDULE_ROW_HEIGHT >
-          scheduleBottomLimit
-        ) {
-          advanceColumnOrPage();
-        }
-        drawMiniMonthHeader(doc, monthLabel, colX(), cursorY, miniWidth);
-        cursorY += SCHEDULE_MONTH_HEIGHT + 1;
-        currentMonthKey = monthKey;
-      }
-
-      // If this row doesn't fit, advance and replay the month header in the
-      // new column so the user keeps the month context.
-      if (cursorY + SCHEDULE_ROW_HEIGHT > scheduleBottomLimit) {
-        advanceColumnOrPage();
-        if (
-          cursorY + SCHEDULE_MONTH_HEIGHT + SCHEDULE_ROW_HEIGHT <=
-          scheduleBottomLimit
-        ) {
-          drawMiniMonthHeader(doc, monthLabel, colX(), cursorY, miniWidth);
-          cursorY += SCHEDULE_MONTH_HEIGHT + 1;
-        }
-      }
-
-      drawScheduleRow(
+      drawScheduleMiniHeader(
         doc,
-        colX(),
-        cursorY,
-        miniColumnWidths,
-        row,
-        rowZebraCounter % 2 === 0
+        x,
+        bodyTop - SCHEDULE_HEADER_HEIGHT - 4,
+        columnWidths,
+        pdfText
       );
-      cursorY += SCHEDULE_ROW_HEIGHT;
-      rowZebraCounter += 1;
+
+      let y = bodyTop;
+      let zebra = 0;
+      column.forEach((item) => {
+        if (item.type === "month") {
+          drawMiniMonthHeader(doc, item.label, x, y, colWidth, rowHeight);
+        } else {
+          drawScheduleRow(doc, x, y, columnWidths, item.row, zebra % 2 === 0, rowHeight);
+          zebra += 1;
+        }
+        y += rowHeight;
+      });
     });
 
     drawFooter(doc, pageNumber, pageWidth, pageHeight);

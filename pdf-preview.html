@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<!--
+  DEV-ONLY visual harness for the Agnihotra PDF export. Renders the REAL
+  shared/export/pdf-export.js output with PDF.js so layout can be inspected
+  across date ranges. Not shipped with the app. Open as:
+    /pdf-preview.html?days=31
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PDF Preview Harness</title>
+  <style>
+    body { margin: 0; background: #555; font-family: system-ui, sans-serif; }
+    #bar {
+      position: sticky; top: 0; z-index: 10; background: #222; color: #eee;
+      padding: 8px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    }
+    #bar a, #bar span { color: #ffd9a8; text-decoration: none; padding: 4px 8px;
+      border: 1px solid #555; border-radius: 6px; font-size: 13px; }
+    #bar a:hover { background: #333; }
+    #status { color: #9fe; }
+    #pages { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 18px; }
+    canvas { box-shadow: 0 4px 18px rgba(0,0,0,.5); background: #fff; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <span>Range:</span>
+    <a href="?days=1">1 day</a>
+    <a href="?days=7">7 days</a>
+    <a href="?days=31">1 month</a>
+    <a href="?days=120">4 months</a>
+    <a href="?days=365">1 year</a>
+    <span id="status">loading…</span>
+  </div>
+  <div id="pages"></div>
+
+  <script src="vendor/jspdf.umd.min.js"></script>
+  <script>
+    document.write(
+      '<scr' + 'ipt src="shared/export/pdf-export.js?cb=' + Date.now() + '"></scr' + 'ipt>'
+    );
+  </script>
+  <script type="module">
+    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs";
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs";
+
+    const status = document.getElementById("status");
+    const pagesEl = document.getElementById("pages");
+
+    function pad(n) { return String(n).padStart(2, "0"); }
+
+    // Deterministic-ish sunrise/sunset that drifts over the year so wrapping,
+    // month transitions, and column flow all get exercised.
+    function buildRows(days) {
+      const rows = [];
+      const start = new Date(2026, 0, 1); // 01 Jan 2026
+      for (let i = 0; i < days; i++) {
+        const d = new Date(start.getTime() + i * 86400000);
+        const riseMin = 6 * 60 + 30 + Math.round(40 * Math.sin((i / 365) * 2 * Math.PI));
+        const setMin = 18 * 60 + 0 + Math.round(45 * Math.sin((i / 365) * 2 * Math.PI + 1));
+        const fmt = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}:00`;
+        rows.push({
+          date: `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`,
+          sunrise: fmt(riseMin),
+          sunset: fmt(setMin),
+        });
+      }
+      return rows;
+    }
+
+    async function run() {
+      const params = new URLSearchParams(location.search);
+      const days = Math.max(1, parseInt(params.get("days") || "31", 10));
+      const loc = params.get("loc") || "Mumbai, Maharashtra, India";
+      const rows = buildRows(days);
+      const toIso = (d) => { const [dd, mm, yy] = d.split("."); return `${yy}-${mm}-${dd}`; };
+      const startLabel = toIso(rows[0].date);
+      const endLabel = toIso(rows[rows.length - 1].date);
+
+      status.textContent = `generating ${days}-day PDF…`;
+      let blob;
+      try {
+        blob = await window.AgnihotraPdfExport.exportToPdf({
+          rows,
+          filename: `preview-${days}.pdf`,
+          locationName: loc,
+          rangeLabel: `${startLabel} to ${endLabel}`,
+        });
+      } catch (e) {
+        status.textContent = "ERROR: " + (e?.message || e);
+        return;
+      }
+
+      const buf = await blob.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      status.textContent = `${days} days · ${pdf.numPages} pages · ${(blob.size / 1024).toFixed(0)} KB`;
+
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const viewport = page.getViewport({ scale: 1.6 });
+        const canvas = document.createElement("canvas");
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        canvas.dataset.page = p;
+        pagesEl.appendChild(canvas);
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+      }
+      document.body.dataset.ready = "1";
+    }
+
+    run();
+  </script>
+</body>
+</html>
