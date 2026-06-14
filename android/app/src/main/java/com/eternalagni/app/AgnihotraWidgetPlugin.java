@@ -1,5 +1,10 @@
 package com.eternalagni.app;
 
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.Settings;
+import androidx.core.app.NotificationManagerCompat;
 import com.eternalagni.app.widget.AgnihotraWidgetScheduler;
 import com.eternalagni.app.widget.AgnihotraWidgetStorage;
 import com.getcapacitor.JSArray;
@@ -70,6 +75,35 @@ public class AgnihotraWidgetPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("enabled", AgnihotraWidgetStorage.isLockCountdownEnabled(getContext()));
         call.resolve(result);
+    }
+
+    @PluginMethod
+    public void areNotificationsEnabled(PluginCall call) {
+        boolean enabled = NotificationManagerCompat.from(getContext()).areNotificationsEnabled();
+        JSObject result = new JSObject();
+        result.put("enabled", enabled);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void openNotificationSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                intent.setAction(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+                intent.putExtra(Settings.EXTRA_APP_PACKAGE, getContext().getPackageName());
+            } else {
+                intent.setAction(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            JSObject result = new JSObject();
+            result.put("ok", true);
+            call.resolve(result);
+        } catch (Exception e) {
+            call.reject("Unable to open notification settings", e);
+        }
     }
 
     @PluginMethod

@@ -594,6 +594,354 @@
     trigger.setAttribute("aria-label", ariaLabel);
   }
 
+  function debounce(fn, ms) {
+    let timer = null;
+    const wrapped = (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), ms);
+    };
+    wrapped.cancel = () => clearTimeout(timer);
+    return wrapped;
+  }
+
+  /**
+   * Full-screen "add a place" flow: free-text autocomplete (Photon) + a
+   * drag-the-map exact picker (Leaflet) for spots missing from the free DB.
+   * onSaved(place) is called after the place is created.
+   */
+  function setupPlaceSearch({ t = (k, fb) => fb || k, dialog, getLastKnownLocation, onSaved }) {
+    const sheet = document.getElementById("placeSearchSheet");
+    if (!sheet) return { open: () => {} };
+
+    const input = document.getElementById("placeSearchInput");
+    const resultsEl = document.getElementById("placeSearchResults");
+    const spinner = document.getElementById("placeSearchSpinner");
+    const clearBtn = document.getElementById("placeSearchClear");
+    const backBtn = document.getElementById("placeSearchBackBtn");
+    const mapEl = document.getElementById("placeSearchMap");
+    const selNameEl = document.getElementById("placeSearchSelName");
+    const selDetailEl = document.getElementById("placeSearchSelDetail");
+    const selCoordsEl = document.getElementById("placeSearchSelCoords");
+    const useBtn = document.getElementById("placeSearchUseBtn");
+    const api = window.AgnihotraPlaceSearch;
+
+    let map = null;
+    let selected = null; // { lat, lng, name, detail, postcode }
+    let searchAbort = null;
+    let reverseAbort = null;
+    let skipNextMoveend = false;
+
+    // Pagination / infinite scroll state.
+    const PAGE_BASE = 8;
+    const PAGE_STEP = 8;
+    const PAGE_MAX = 40;
+    let lastQuery = "";
+    let pageLimit = PAGE_BASE;
+    let currentItems = [];
+    let hasMore = false;
+    let loadingMore = false;
+
+    function setSpinner(on) {
+      spinner?.classList.toggle("hidden", !on);
+    }
+
+    function setSelected(next) {
+      selected = next;
+      if (next) {
+        selNameEl.textContent = next.name || "";
+        selDetailEl.textContent = next.detail || "";
+        if (selCoordsEl) {
+          selCoordsEl.textContent =
+            Number.isFinite(next.lat) && Number.isFinite(next.lng)
+              ? `${next.lat.toFixed(6)}, ${next.lng.toFixed(6)}`
+              : "";
+        }
+        useBtn.removeAttribute("disabled");
+      } else {
+        selNameEl.textContent = "";
+        selDetailEl.textContent = "";
+        if (selCoordsEl) selCoordsEl.textContent = "";
+        useBtn.setAttribute("disabled", "true");
+      }
+    }
+
+    function renderResults(items, { footer } = {}) {
+      currentItems = items || [];
+      if (!currentItems.length && !footer) {
+        resultsEl.innerHTML = "";
+        resultsEl.classList.remove("is-open");
+        input?.setAttribute("aria-expanded", "false");
+        return;
+      }
+      const rows = currentItems
+        .map((r, i) => {
+          return `<li role="option" class="place-search-result" data-idx="${i}">
+            <span class="place-search-result-icon"><i class="fas fa-location-dot"></i></span>
+            <span class="place-search-result-text">
+              <span class="place-search-result-name">${escapeHtml(r.name)}</span>
+              <span class="place-search-result-detail">${escapeHtml(r.detail)}</span>
+            </span>
+          </li>`;
+        })
+        .join("");
+      const footerRow = footer
+        ? `<li class="place-search-result-footer" aria-disabled="true">${escapeHtml(
+            footer
+          )}</li>`
+        : "";
+      resultsEl.innerHTML = rows + footerRow;
+      resultsEl.classList.add("is-open");
+      input?.setAttribute("aria-expanded", "true");
+      resultsEl.querySelectorAll(".place-search-result").forEach((li) => {
+        li.addEventListener("click", () => {
+          const item = currentItems[Number(li.getAttribute("data-idx"))];
+          if (item) chooseResult(item);
+        });
+      });
+    }
+
+    async function fetchPage(q, limit, signal) {
+      const center = map?.getCenter();
+      return api.search(q, {
+        lat: center?.lat ?? getLastKnownLocation?.()?.lat,
+        lng: center?.lng ?? getLastKnownLocation?.()?.lng,
+        lang:
+          (typeof document !== "undefined" && document.documentElement.lang) ||
+          "en",
+        limit,
+        signal,
+      });
+    }
+
+    async function loadMore() {
+      if (loadingMore || !hasMore || !lastQuery) return;
+      if (pageLimit >= PAGE_MAX) return;
+      loadingMore = true;
+      renderResults(currentItems, {
+        footer: t("places.searchLoadingMore", "Loading more…"),
+      });
+      const nextLimit = Math.min(PAGE_MAX, pageLimit + PAGE_STEP);
+      if (searchAbort) searchAbort.abort();
+      searchAbort = new AbortController();
+      try {
+        const items = await fetchPage(lastQuery, nextLimit, searchAbort.signal);
+        pageLimit = nextLimit;
+        hasMore = items.length >= nextLimit && nextLimit < PAGE_MAX;
+        renderResults(items);
+      } catch (err) {
+        if (err?.name !== "AbortError") renderResults(currentItems);
+      } finally {
+        loadingMore = false;
+      }
+    }
+
+    function chooseResult(item) {
+      renderResults([]);
+      input.value = item.name;
+      setSelected({
+        lat: item.lat,
+        lng: item.lng,
+        name: item.name,
+        detail: item.detail,
+        postcode: item.postcode || null,
+      });
+      if (map) {
+        skipNextMoveend = true; // we already have this address from the result
+        map.setView([item.lat, item.lng], 16, { animate: true });
+      }
+    }
+
+    const runSearch = debounce(async (q) => {
+      const query = q.trim();
+      if (!api || query.length < 2) {
+        lastQuery = "";
+        hasMore = false;
+        renderResults([]);
+        setSpinner(false);
+        return;
+      }
+      if (searchAbort) searchAbort.abort();
+      searchAbort = new AbortController();
+      setSpinner(true);
+      lastQuery = query;
+      pageLimit = PAGE_BASE;
+      hasMore = false;
+      try {
+        const items = await fetchPage(query, pageLimit, searchAbort.signal);
+        hasMore = items.length >= pageLimit && pageLimit < PAGE_MAX;
+        renderResults(items);
+      } catch (err) {
+        if (err?.name !== "AbortError") renderResults([]);
+      } finally {
+        setSpinner(false);
+      }
+    }, 320);
+
+    resultsEl?.addEventListener("scroll", () => {
+      if (
+        resultsEl.scrollTop + resultsEl.clientHeight >=
+        resultsEl.scrollHeight - 28
+      ) {
+        loadMore();
+      }
+    });
+
+    const reverseCenter = debounce(async () => {
+      if (!api || !map) return;
+      if (reverseAbort) reverseAbort.abort();
+      reverseAbort = new AbortController();
+      const c = map.getCenter();
+      // Keep the button usable immediately with coords; refine with address.
+      setSelected({
+        lat: c.lat,
+        lng: c.lng,
+        name: selected?.name || `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`,
+        detail: selected?.detail || "",
+        postcode: selected?.postcode || null,
+      });
+      try {
+        const r = await api.reverse(c.lat, c.lng, {
+          lang: document.documentElement.lang || "en",
+          signal: reverseAbort.signal,
+        });
+        if (r) {
+          setSelected({
+            lat: c.lat,
+            lng: c.lng,
+            name: r.name,
+            detail: r.detail,
+            postcode: r.postcode || null,
+          });
+        }
+      } catch (_) {}
+    }, 550);
+
+    function ensureMap() {
+      if (map || !mapEl || typeof L === "undefined") return;
+      const last = getLastKnownLocation?.();
+      const startLat = Number.isFinite(last?.lat) ? last.lat : 20.5937;
+      const startLng = Number.isFinite(last?.lng) ? last.lng : 78.9629;
+      const startZoom = Number.isFinite(last?.lat) ? 14 : 5;
+      map = L.map(mapEl, {
+        zoomControl: true,
+        attributionControl: true,
+        tap: true,
+      }).setView([startLat, startLng], startZoom);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "© OpenStreetMap contributors",
+      }).addTo(map);
+
+      // moveend fires once per move (drag OR zoom OR programmatic setView).
+      // We skip only the programmatic setView that follows a result tap; every
+      // real user drag/zoom re-resolves the center (so longitude updates too).
+      map.on("moveend", () => {
+        if (skipNextMoveend) {
+          skipNextMoveend = false;
+          return;
+        }
+        reverseCenter();
+      });
+    }
+
+    function open() {
+      sheet.classList.remove("hidden");
+      sheet.setAttribute("aria-hidden", "false");
+      document.body.classList.add("place-search-open");
+      input.value = "";
+      renderResults([]);
+      setSelected(null);
+      ensureMap();
+      requestAnimationFrame(() => {
+        map?.invalidateSize();
+        const last = getLastKnownLocation?.();
+        if (map && Number.isFinite(last?.lat)) {
+          skipNextMoveend = true;
+          map.setView([last.lat, last.lng], 14);
+        }
+        input.focus();
+      });
+    }
+
+    function close() {
+      sheet.classList.add("hidden");
+      sheet.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("place-search-open");
+      searchAbort?.abort();
+      reverseAbort?.abort();
+      runSearch.cancel();
+      reverseCenter.cancel();
+    }
+
+    input?.addEventListener("input", () => {
+      const q = input.value;
+      clearBtn?.classList.toggle("hidden", !q);
+      runSearch(q);
+    });
+    input?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const first = resultsEl.querySelector(".place-search-result");
+        first?.click();
+      }
+    });
+    clearBtn?.addEventListener("click", () => {
+      input.value = "";
+      clearBtn.classList.add("hidden");
+      renderResults([]);
+      input.focus();
+    });
+    backBtn?.addEventListener("click", close);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !sheet.classList.contains("hidden")) close();
+    });
+
+    useBtn?.addEventListener("click", async () => {
+      if (!selected) return;
+      const previewParts = [selected.detail].filter(Boolean);
+      if (selected.postcode && !String(selected.detail || "").includes(selected.postcode)) {
+        previewParts.push(selected.postcode);
+      }
+      const label = await dialog.promptSavePlace({
+        t,
+        defaultValue: String(selected.name || "").split(",")[0].trim(),
+        locationPreview: [selected.name, ...previewParts].filter(Boolean).join(", "),
+        title: t("places.searchSaveTitle", "Name this place"),
+        hint: t("places.saveDialogHint", "Give it a name you'll recognize when switching."),
+        confirmText: t("places.saveDialogConfirm", "Save place"),
+      });
+      if (label == null) return;
+
+      const detailParts = [];
+      if (selected.detail) detailParts.push(selected.detail);
+      if (selected.postcode && !detailParts.join(" ").includes(selected.postcode)) {
+        detailParts.push(selected.postcode);
+      }
+      const result = addPlace({
+        label,
+        lat: selected.lat,
+        lng: selected.lng,
+        locationName: selected.name || null,
+        locationDetail: detailParts.join(" • ") || null,
+      });
+      if (!result.ok) {
+        if (result.reason === "max") {
+          await dialog.alert({
+            t,
+            tone: "info",
+            title: t("places.maxTitle", "Limit reached"),
+            message: t("places.maxReached", `You can save up to ${MAX_PLACES} places.`),
+          });
+        }
+        return;
+      }
+      close();
+      await onSaved?.(result.place);
+    });
+
+    return { open };
+  }
+
   function setupPlacePickerUI(deps) {
     const {
       t = (k, fb) => fb || k,
@@ -611,8 +959,48 @@
     const addBtn = document.getElementById("placePickerAddBtn");
     const closeBtn = document.getElementById("placePickerCloseBtn");
     const backdrop = sheet?.querySelector(".place-picker-backdrop");
+    const listWrap = list?.parentElement;
+    const scrollCue = document.getElementById("placePickerScrollCue");
 
     if (!sheet || !list || !trigger) return;
+
+    function pickerDistanceKm(a, b) {
+      if (
+        !a ||
+        !b ||
+        !Number.isFinite(a.lat) ||
+        !Number.isFinite(a.lng) ||
+        !Number.isFinite(b.lat) ||
+        !Number.isFinite(b.lng)
+      ) {
+        return Number.POSITIVE_INFINITY;
+      }
+      const toRad = (d) => (d * Math.PI) / 180;
+      const R = 6371;
+      const dLat = toRad(b.lat - a.lat);
+      const dLng = toRad(b.lng - a.lng);
+      const s =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+    }
+
+    function updateScrollCues() {
+      if (!listWrap) return;
+      const moreBelow =
+        list.scrollHeight - list.clientHeight - list.scrollTop > 6;
+      const moreAbove = list.scrollTop > 6;
+      listWrap.classList.toggle("can-scroll-down", moreBelow);
+      listWrap.classList.toggle("can-scroll-up", moreAbove);
+    }
+
+    list.addEventListener("scroll", updateScrollCues, { passive: true });
+    scrollCue?.addEventListener("click", () => {
+      list.scrollBy({ top: Math.round(list.clientHeight * 0.8), behavior: "smooth" });
+    });
+    if (typeof window !== "undefined") {
+      window.addEventListener("resize", updateScrollCues);
+    }
 
     const dialog = createAgniDialog();
 
@@ -626,16 +1014,34 @@
     function openSheet() {
       markPlaceSwitchHintSeen();
       renderList();
+      placeSearch?.reflectOnlineState?.();
       sheet.classList.remove("hidden");
       sheet.setAttribute("aria-hidden", "false");
       trigger.setAttribute("aria-expanded", "true");
       document.body.classList.add("place-picker-open");
+      requestAnimationFrame(() => requestAnimationFrame(updateScrollCues));
       onPlacePickerOpen?.();
     }
 
     function renderList() {
       const activeId = getActivePlaceId();
-      const places = getPlaces();
+      const allPlaces = getPlaces();
+
+      // Order saved places by ascending distance from the current reference
+      // point: the active saved place if there is one, otherwise the device's
+      // last known location. The active place naturally sorts first (distance 0).
+      const activePlace = allPlaces.find((p) => p.id === activeId);
+      const ref =
+        activePlace && Number.isFinite(activePlace.lat)
+          ? { lat: activePlace.lat, lng: activePlace.lng }
+          : getLastKnownLocation?.();
+      let places = allPlaces;
+      if (ref && Number.isFinite(ref.lat) && Number.isFinite(ref.lng)) {
+        places = [...allPlaces].sort(
+          (p1, p2) => pickerDistanceKm(ref, p1) - pickerDistanceKm(ref, p2)
+        );
+      }
+
       const autoLabel = t("places.currentGps", "Current location (GPS)");
       const autoActive = activeId === AUTO_ID;
 
@@ -680,6 +1086,7 @@
       });
 
       list.innerHTML = html;
+      requestAnimationFrame(updateScrollCues);
 
       async function applyPlaceSelection(handler) {
         closeSheet();
@@ -886,6 +1293,61 @@
         closeSheet();
       }
     });
+
+    // ---- Search-a-place + drag-map exact picker ----------------------------
+    const placeSearch = setupPlaceSearch({
+      t,
+      dialog,
+      getLastKnownLocation,
+      onSaved: async (place) => {
+        setActivePlaceId(place.id);
+        closeSheet();
+        await new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve))
+        );
+        await onSelectPlace?.(place);
+        onPlacesChanged?.();
+      },
+    });
+
+    const searchBtn = document.getElementById("placePickerSearchBtn");
+
+    // Search + map need the network (Photon / Nominatim / OSM tiles). Disable
+    // the entry point when offline so users aren't dropped into a dead screen.
+    function isOnlineForSearch() {
+      if (typeof window !== "undefined" && window.__agnihotraForcedOffline) {
+        return false;
+      }
+      return typeof navigator === "undefined" || navigator.onLine !== false;
+    }
+
+    function reflectSearchOnlineState() {
+      if (!searchBtn) return;
+      const online = isOnlineForSearch();
+      searchBtn.disabled = !online;
+      searchBtn.classList.toggle("place-picker-action--offline", !online);
+      const span = searchBtn.querySelector("span");
+      if (span) {
+        if (!searchBtn.dataset.onlineLabel) {
+          searchBtn.dataset.onlineLabel = span.textContent;
+        }
+        span.textContent = online
+          ? searchBtn.dataset.onlineLabel
+          : t("places.searchOffline", "Search needs internet");
+      }
+    }
+
+    searchBtn?.addEventListener("click", () => {
+      if (!isOnlineForSearch()) return;
+      placeSearch?.open();
+    });
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", reflectSearchOnlineState);
+      window.addEventListener("offline", reflectSearchOnlineState);
+    }
+    reflectSearchOnlineState();
+    placeSearch.reflectOnlineState = reflectSearchOnlineState;
 
     updateLocationPlaceTriggerUI(t);
     if (!hasSeenPlaceSwitchHint()) {

@@ -108,6 +108,7 @@
     <link rel="stylesheet" href="assets/vendor/icono/icono.min.css">
     <link rel="stylesheet" href="assets/vendor/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="assets/vendor/fonts/fonts.css">
+    <link rel="stylesheet" href="assets/vendor/leaflet/leaflet.css">
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -577,9 +578,21 @@
                 </button>
             </div>
             <p class="place-picker-desc" data-i18n="places.subtitle">Switch between saved places, or tag where you are now.</p>
-            <ul id="placePickerList" class="place-picker-list"></ul>
+            <div class="place-picker-list-wrap">
+                <ul id="placePickerList" class="place-picker-list"></ul>
+                <button type="button" id="placePickerScrollCue" class="place-picker-scroll-cue" tabindex="-1" aria-hidden="true">
+                    <span class="place-picker-scroll-cue-pill">
+                        <span data-i18n="places.scrollMore">More places below</span>
+                        <i class="fas fa-chevron-down"></i>
+                    </span>
+                </button>
+            </div>
             <div class="place-picker-actions">
-                <button type="button" id="placePickerAddBtn" class="place-picker-action place-picker-action--primary">
+                <button type="button" id="placePickerSearchBtn" class="place-picker-action place-picker-action--primary">
+                    <i class="fas fa-magnifying-glass-location"></i>
+                    <span data-i18n="places.searchAdd">Search a place to add</span>
+                </button>
+                <button type="button" id="placePickerAddBtn" class="place-picker-action place-picker-action--secondary">
                     <i class="fas fa-location-dot"></i>
                     <span data-i18n="places.tagCurrent">Tag this location</span>
                 </button>
@@ -587,6 +600,57 @@
                     <i class="fas fa-crosshairs"></i>
                     <span data-i18n="places.currentGps">Use current location (GPS)</span>
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add-a-place: free text search (Photon) + drag-map exact picker (Leaflet) -->
+    <div id="placeSearchSheet" class="place-search-sheet hidden" aria-hidden="true" role="dialog" aria-labelledby="placeSearchTitle">
+        <div class="place-search-panel">
+            <div class="place-search-header">
+                <button type="button" id="placeSearchBackBtn" class="place-search-back" aria-label="Back">
+                    <i class="fas fa-arrow-left"></i>
+                </button>
+                <h3 id="placeSearchTitle" data-i18n="places.searchTitle">Add a place</h3>
+            </div>
+            <div class="place-search-search">
+                <div class="place-search-box">
+                    <i class="fas fa-magnifying-glass place-search-box-icon" aria-hidden="true"></i>
+                    <input type="text" id="placeSearchInput" class="place-search-input" autocomplete="off"
+                        autocapitalize="words" spellcheck="false" enterkeyhint="search"
+                        placeholder="Search city, area, society…" data-i18n-placeholder="places.searchPlaceholder"
+                        aria-label="Search for a place" role="combobox" aria-expanded="false"
+                        aria-autocomplete="list" aria-controls="placeSearchResults" />
+                    <span id="placeSearchSpinner" class="place-search-spinner hidden" aria-hidden="true"><i class="fas fa-circle-notch fa-spin"></i></span>
+                    <button type="button" id="placeSearchClear" class="place-search-clear hidden" aria-label="Clear search">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <ul id="placeSearchResults" class="place-search-results" role="listbox"></ul>
+            </div>
+            <p class="place-search-note" data-i18n="places.searchNote">
+                Free search powered by OpenStreetMap — your exact place may not be listed. Tip: search by area or pincode, then drag the map to pin your exact spot.
+            </p>
+            <div class="place-search-map-wrap">
+                <div id="placeSearchMap" class="place-search-map"></div>
+                <div class="place-search-pin" aria-hidden="true"><i class="fas fa-location-dot"></i></div>
+                <div class="place-search-map-hint" data-i18n="places.dragHint">Drag the map to set the exact spot</div>
+            </div>
+            <div class="place-search-selected">
+                <span class="place-search-selected-name" id="placeSearchSelName"></span>
+                <span class="place-search-selected-detail" id="placeSearchSelDetail"></span>
+                <span class="place-search-selected-coords" id="placeSearchSelCoords"></span>
+            </div>
+            <div class="place-search-footer">
+                <button type="button" id="placeSearchUseBtn" class="place-picker-action place-picker-action--primary" disabled>
+                    <i class="fas fa-check"></i>
+                    <span data-i18n="places.useLocation">Use this location</span>
+                </button>
+                <p class="place-search-credits" data-i18n-html="places.searchCredits">
+                    Huge thanks to <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>,
+                    <a href="https://nominatim.org" target="_blank" rel="noopener">Nominatim</a> &amp;
+                    <a href="https://photon.komoot.io" target="_blank" rel="noopener">Photon by Komoot</a> for free, open geocoding.
+                </p>
             </div>
         </div>
     </div>
@@ -1027,6 +1091,8 @@
     <script src="shared/audio/bell.js"></script>
     <script src="shared/app/audio-controls.js"></script>
     <script src="shared/app/permissions-gate.js"></script>
+    <script src="assets/vendor/leaflet/leaflet.js"></script>
+    <script src="shared/app/place-search.js"></script>
     <script src="shared/app/saved-places.js"></script>
     <script src="shared/diagnostics/instrumentation.js"></script>
     <script src="shared/diagnostics/payload-builder.js"></script>
