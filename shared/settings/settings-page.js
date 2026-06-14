@@ -381,6 +381,176 @@
     });
   }
 
+  function capPlugins() {
+    return (window.Capacitor && window.Capacitor.Plugins) || {};
+  }
+
+  function isNativeRuntime() {
+    try {
+      return !!(
+        window.Capacitor &&
+        window.Capacitor.isNativePlatform &&
+        window.Capacitor.isNativePlatform()
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Returns "granted" | "denied" | "prompt" | "prompt-with-rationale" | "unsupported".
+  async function checkNotificationPermission() {
+    const LN = capPlugins().LocalNotifications;
+    if (!LN?.checkPermissions) return "unsupported";
+    try {
+      const res = await LN.checkPermissions();
+      return res?.display || "unsupported";
+    } catch (_) {
+      return "unsupported";
+    }
+  }
+
+  async function requestNotificationPermission() {
+    const LN = capPlugins().LocalNotifications;
+    if (!LN?.requestPermissions) return "unsupported";
+    try {
+      const res = await LN.requestPermissions();
+      return res?.display || "denied";
+    } catch (_) {
+      return "denied";
+    }
+  }
+
+  // Even with POST_NOTIFICATIONS granted, the user may have switched the app's
+  // notifications off entirely — that also blocks the ongoing countdown.
+  async function notificationsFullyEnabled() {
+    if (!isNativeRuntime()) return true;
+    const perm = await checkNotificationPermission();
+    if (perm !== "granted" && perm !== "unsupported") return false;
+    const widget = capPlugins().AgnihotraWidget;
+    if (widget?.areNotificationsEnabled) {
+      try {
+        const r = await widget.areNotificationsEnabled();
+        return !!r?.enabled;
+      } catch (_) {}
+    }
+    return true;
+  }
+
+  async function openNotificationSettings() {
+    const widget = capPlugins().AgnihotraWidget;
+    if (widget?.openNotificationSettings) {
+      try {
+        await widget.openNotificationSettings();
+        return true;
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  function showPermissionDialog() {
+    const existing = document.getElementById("permDialogScrim");
+    if (existing) existing.remove();
+
+    const scrim = document.createElement("div");
+    scrim.id = "permDialogScrim";
+    scrim.className = "perm-dialog-scrim";
+
+    const close = () => scrim.remove();
+
+    scrim.innerHTML = `
+      <div class="perm-dialog" role="dialog" aria-modal="true" aria-labelledby="permDialogTitle">
+        <div class="perm-dialog-icon" aria-hidden="true"><i class="fa-solid fa-bell"></i></div>
+        <h3 id="permDialogTitle" class="perm-dialog-title">${escapeText(
+          tr("settings.lockCountdown.permTitle", "Allow notifications")
+        )}</h3>
+        <p class="perm-dialog-body">${escapeText(
+          tr(
+            "settings.lockCountdown.permBody",
+            "To show the countdown on your lock screen, EternalAgni needs permission to post notifications. Please turn on notifications for this app, then try again."
+          )
+        )}</p>
+        <div class="perm-dialog-actions">
+          <button type="button" class="perm-dialog-btn perm-dialog-btn--ghost" data-perm-cancel>${escapeText(
+            tr("settings.lockCountdown.permCancel", "Not now")
+          )}</button>
+          <button type="button" class="perm-dialog-btn perm-dialog-btn--primary" data-perm-open>${escapeText(
+            tr("settings.lockCountdown.permOpenSettings", "Open settings")
+          )}</button>
+        </div>
+      </div>`;
+
+    scrim.addEventListener("click", (e) => {
+      if (e.target === scrim) close();
+    });
+    scrim.querySelector("[data-perm-cancel]")?.addEventListener("click", close);
+    scrim.querySelector("[data-perm-open]")?.addEventListener("click", async () => {
+      close();
+      await openNotificationSettings();
+    });
+
+    document.body.appendChild(scrim);
+  }
+
+  function escapeText(str) {
+    return String(str == null ? "" : str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  async function persistLockCountdown(enabled) {
+    setBooleanSetting(LOCK_COUNTDOWN_STORAGE_KEY, enabled);
+    window.AgnihotraInstrumentation?.recordSettingsChange?.("lock-countdown", enabled);
+    const widgetPlugin = capPlugins().AgnihotraWidget;
+    if (widgetPlugin?.setLockScreenCountdown) {
+      try {
+        await widgetPlugin.setLockScreenCountdown({ enabled });
+      } catch (error) {
+        console.warn("[AGNIHOTRA][LOCKCOUNTDOWN] setLockScreenCountdown failed", error);
+      }
+    }
+  }
+
+  function setupLockCountdownToggle() {
+    const input = document.getElementById("lockCountdownToggle");
+    if (!input) return;
+    input.checked = getBooleanSetting(LOCK_COUNTDOWN_STORAGE_KEY, false);
+
+    input.addEventListener("change", async () => {
+      if (!input.checked) {
+        await persistLockCountdown(false);
+        setStatus(tr("settings.status.lockCountdownSaved", "Lock screen countdown setting saved."));
+        return;
+      }
+
+      // Turning ON — make sure we can actually post notifications first.
+      if (isNativeRuntime()) {
+        let perm = await checkNotificationPermission();
+        if (perm === "prompt" || perm === "prompt-with-rationale") {
+          perm = await requestNotificationPermission();
+        }
+        const enabledOk = perm === "granted" || perm === "unsupported";
+        const channelsOk = enabledOk ? await notificationsFullyEnabled() : false;
+        if (!enabledOk || !channelsOk) {
+          input.checked = false;
+          setBooleanSetting(LOCK_COUNTDOWN_STORAGE_KEY, false);
+          setStatus(
+            tr(
+              "settings.status.lockCountdownNeedsPermission",
+              "Turn on notifications to show the lock screen countdown."
+            ),
+            true
+          );
+          showPermissionDialog();
+          return;
+        }
+      }
+
+      await persistLockCountdown(true);
+      setStatus(tr("settings.status.lockCountdownSaved", "Lock screen countdown setting saved."));
+    });
+  }
+
   function setupToggleSetting({
     inputId,
     storageKey,
@@ -424,30 +594,22 @@
         }
       },
     });
-    setupToggleSetting({
-      inputId: "lockCountdownToggle",
-      storageKey: LOCK_COUNTDOWN_STORAGE_KEY,
-      defaultValue: false,
-      settingName: "lock-countdown",
-      savedMessageKey: "settings.status.lockCountdownSaved",
-      savedMessageFallback: "Lock screen countdown setting saved.",
-      onAfterChange: async (enabled) => {
-        console.log(
-          `[AGNIHOTRA][LOCKCOUNTDOWN] settings-changed ${JSON.stringify({ enabled })}`
-        );
-        const widgetPlugin = window.Capacitor?.Plugins?.AgnihotraWidget;
-        if (widgetPlugin?.setLockScreenCountdown) {
-          await widgetPlugin.setLockScreenCountdown({ enabled });
-        }
-      },
-    });
+    setupLockCountdownToggle();
     // Reconcile the native flag with the saved JS preference (default OFF). This
     // clears any stale native state so the countdown notification never shows
     // unless the user explicitly turned it on.
     (async () => {
       try {
-        const enabled = getBooleanSetting(LOCK_COUNTDOWN_STORAGE_KEY, false);
-        const widgetPlugin = window.Capacitor?.Plugins?.AgnihotraWidget;
+        let enabled = getBooleanSetting(LOCK_COUNTDOWN_STORAGE_KEY, false);
+        // If notifications got turned off in the OS after the user enabled this,
+        // reflect reality: switch the toggle (and native flag) back off.
+        if (enabled && isNativeRuntime() && !(await notificationsFullyEnabled())) {
+          enabled = false;
+          setBooleanSetting(LOCK_COUNTDOWN_STORAGE_KEY, false);
+          const toggle = document.getElementById("lockCountdownToggle");
+          if (toggle) toggle.checked = false;
+        }
+        const widgetPlugin = capPlugins().AgnihotraWidget;
         if (widgetPlugin?.setLockScreenCountdown) {
           await widgetPlugin.setLockScreenCountdown({ enabled });
         }

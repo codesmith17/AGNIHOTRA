@@ -1839,6 +1839,23 @@ function applyTranslations() {
       textTarget.textContent = translated;
     }
   });
+
+  document.querySelectorAll("[data-i18n-html]").forEach((element) => {
+    const key = element.getAttribute("data-i18n-html");
+    const translated = t(key, element.innerHTML.trim());
+    if (translated) {
+      element.innerHTML = translated;
+    }
+  });
+
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => {
+    const key = element.getAttribute("data-i18n-placeholder");
+    const fallback = element.getAttribute("placeholder") || "";
+    const translated = t(key, fallback);
+    if (translated) {
+      element.setAttribute("placeholder", translated);
+    }
+  });
   const locationLoadingText = document.getElementById("locationLoadingText");
   if (locationLoadingText) {
     locationLoadingText.textContent = t(

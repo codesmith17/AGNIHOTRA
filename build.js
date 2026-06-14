@@ -53,6 +53,7 @@ const filesToCopy = [
     'shared/audio/bell.js',
     'shared/app/audio-controls.js',
     'shared/app/permissions-gate.js',
+    'shared/app/place-search.js',
     'shared/app/saved-places.js',
     'shared/app/runtime.js',
     'shared/app/ota-updater.js',
