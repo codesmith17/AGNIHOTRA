@@ -3,6 +3,7 @@ node_modules/
 
 # Generated web build output
 public/
+dist/
 
 # Android/Gradle build output
 android/.gradle/
@@ -20,6 +21,7 @@ release/ota/
 # Signing files / secrets
 *.jks
 *.keystore
+android/keystore.properties
 android/local.properties
 
 # Backup files

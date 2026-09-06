@@ -46,6 +46,7 @@ const filesToCopy = [
     'index.html',
     'settings.html',
     'support.html',
+    'privacy.html',
     'manifest.webmanifest',
     'translations.json',
     'shared/notifications/core.js',
