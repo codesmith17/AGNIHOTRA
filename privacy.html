@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en" translate="no" class="notranslate">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>
+    (function () {
+      var isNative = false;
+      try {
+        isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+      } catch (e) {}
+      document.documentElement.classList.add(isNative ? 'agni-platform-native' : 'agni-platform-web');
+      window.AgnihotraRuntime = { isNative: isNative, isWeb: !isNative, platform: isNative ? 'native' : 'web' };
+    })();
+  </script>
+  <meta name="theme-color" content="#ff7f32">
+  <title>EternalAgni Privacy Policy</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/images/app-icon-192.png">
+  <link rel="stylesheet" href="assets/vendor/fontawesome/css/all.min.css">
+  <link rel="stylesheet" href="assets/vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body translate="no" class="notranslate settings-page-body">
+  <section class="settings-section fade-in">
+    <header class="settings-page-header">
+      <a href="index.html#home" class="settings-page-brand">
+        <img src="assets/images/eternalagni-icon.png" alt="" class="settings-page-logo" width="52" height="52">
+        <div class="settings-page-brand-text">
+          <p class="settings-page-eyebrow">EternalAgni</p>
+          <h2>Privacy Policy</h2>
+        </div>
+      </a>
+      <p class="section-desc settings-page-desc">
+        Last updated: 6 September 2026 &middot; Applies to the EternalAgni Android app
+        (<code>com.eternalagni.app</code>) and the EternalAgni website.
+      </p>
+    </header>
+
+    <section class="support-section-card">
+      <div class="support-section-header">
+        <span class="settings-card-icon settings-card-icon--support" aria-hidden="true"><i class="fa-solid fa-shield-halved"></i></span>
+        <div class="settings-card-head-text">
+          <h3>The short version</h3>
+          <p>
+            EternalAgni has no accounts, no sign-in, no advertising and no analytics. We do not
+            run a server that stores anything about you. Your saved places, reminder settings and
+            preferences stay on your device.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="support-section-card">
+      <div class="settings-card-head-text">
+        <h3>What stays on your device</h3>
+        <p>
+          Agnihotra sunrise and sunset timings are calculated entirely on your device using the
+          NOAA solar position algorithm. The following are stored locally in the app and are never
+          transmitted to us:
+        </p>
+        <ul>
+          <li>Your chosen location and any saved places (name, latitude, longitude)</li>
+          <li>Reminder, notification, sound and language preferences</li>
+          <li>Diagnostic logs the app keeps for troubleshooting (pruned after 30 days)</li>
+        </ul>
+        <p>
+          Uninstalling the app removes all of this. You can also clear individual saved places and
+          reset preferences from within the app at any time.
+        </p>
+      </div>
+    </section>
+
+    <section class="support-section-card">
+      <div class="settings-card-head-text">
+        <h3>Location</h3>
+        <p>
+          Accurate Agnihotra timings depend on your geographic coordinates. Granting location
+          access is <strong>optional</strong> &mdash; you can instead search for a place by name or
+          pick a point on the map, and the app works fully without the permission.
+        </p>
+        <p>If you do use location, or search for a place, coordinates or your search text are sent to:</p>
+        <ul>
+          <li>
+            <strong>Nominatim</strong> (OpenStreetMap Foundation) and <strong>Photon</strong>
+            (Komoot) &mdash; to turn coordinates into a place name, and place names into
+            coordinates.
+          </li>
+          <li>
+            <strong>OpenStreetMap tile servers</strong> &mdash; to draw the map when you pick a
+            place visually.
+          </li>
+        </ul>
+        <p>
+          These requests are made over HTTPS, are used only to answer that one request, and carry
+          no account or advertising identifier. We do not receive a copy of them and we do not
+          store your location on any server. Those services handle the request under their own
+          privacy policies
+          (<a href="https://osmfoundation.org/wiki/Privacy_Policy" rel="noopener">OpenStreetMap Foundation</a>,
+          <a href="https://www.komoot.com/privacy" rel="noopener">Komoot</a>).
+        </p>
+      </div>
+    </section>
+
+    <section class="support-section-card">
+      <div class="settings-card-head-text">
+        <h3>Other network connections</h3>
+        <ul>
+          <li>
+            <strong>Update checks.</strong> The app asks GitHub whether a newer release is
+            available. This sends only a standard web request; no personal data is attached.
+          </li>
+          <li>
+            <strong>PDF schedule export.</strong> Generating a PDF fetches a QR code image for the
+            EternalAgni website address. The QR code contains only that public website link &mdash;
+            none of your data.
+          </li>
+        </ul>
+        <p>All network traffic from the app uses HTTPS.</p>
+      </div>
+    </section>
+
+    <section class="support-section-card">
+      <div class="settings-card-head-text">
+        <h3>Support reports</h3>
+        <p>
+          If you tap &ldquo;Share Support Report&rdquo;, the app builds a diagnostic file and hands
+          it to the email or sharing app you choose. Nothing is sent automatically &mdash; you decide
+          whether to send it, to whom, and you can review or delete the attachment first. If you do
+          email us, we use the report and your email address only to answer your support request.
+        </p>
+      </div>
+    </section>
+
+    <section class="support-section-card">
+      <div class="settings-card-head-text">
+        <h3>Permissions and why they are used</h3>
+        <ul>
+          <li><strong>Location</strong> &mdash; optional; to compute timings for where you are.</li>
+          <li><strong>Notifications</strong> &mdash; to deliver your sunrise and sunset reminders.</li>
+          <li><strong>Alarms and reminders</strong> &mdash; Agnihotra must be performed at an exact moment, so reminders are scheduled as exact alarms.</li>
+          <li><strong>Full-screen notifications</strong> &mdash; to show the countdown on your lock screen at ritual time, if you enable it.</li>
+          <li><strong>Run at startup</strong> &mdash; to restore your scheduled reminders after the device reboots.</li>
+          <li><strong>Ignore battery optimisations</strong> &mdash; optional; you are asked only if reminders are being delayed by power saving.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="support-section-card">
+      <div class="settings-card-head-text">
+        <h3>Children</h3>
+        <p>
+          EternalAgni is not directed at children and does not knowingly collect information from
+          them.
+        </p>
+      </div>
+    </section>
+
+    <section class="support-section-card">
+      <div class="settings-card-head-text">
+        <h3>Changes and contact</h3>
+        <p>
+          If this policy changes, the updated version will be posted on this page with a new date.
+          For any privacy question, or to ask about data related to a support report you sent,
+          contact <a href="mailto:kanchanlatakrishna@gmail.com">kanchanlatakrishna@gmail.com</a>.
+        </p>
+      </div>
+    </section>
+
+    <footer class="settings-page-footer">
+      <a href="index.html#home" class="settings-action-btn"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to EternalAgni</a>
+    </footer>
+  </section>
+</body>
+</html>
