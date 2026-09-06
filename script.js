@@ -4250,6 +4250,79 @@ function buildWidgetUpcomingEvents(todayResults, tomorrowResults, currentTime = 
     .sort((a, b) => a.time - b.time);
 }
 
+/**
+ * Builds a long horizon of sunrise/sunset events (default: next 8 days) straight
+ * from the cached 3-month timings so the home-screen widget always has real
+ * future targets to roll into. This is what lets the native midnight alarm
+ * advance to the new day's timing using locally-stored values, without the app
+ * needing to be opened — and keeps the widget countdown pointed at a genuine
+ * future event so it can never tick into negative numbers.
+ */
+function buildWidgetUpcomingEventsMultiDay(currentTime = Date.now(), daysAhead = 8) {
+  let timings = null;
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.timings && typeof parsed.timings === "object") {
+        timings = parsed.timings;
+      }
+    }
+  } catch (_) {
+    timings = null;
+  }
+  if (!timings) return [];
+
+  const events = [];
+  const base = new Date(currentTime);
+  for (let offset = 0; offset <= daysAhead; offset++) {
+    const day = new Date(base);
+    day.setDate(day.getDate() + offset);
+    const key = formatDateToDDMMYYYY(day);
+    const row = normalizeTimingDayResults(timings[key], key);
+    if (!row?.sunrise || !row?.sunset) continue;
+
+    const sunriseLabel =
+      offset === 0
+        ? t("events.todaysSunrise", "Today's Sunrise")
+        : offset === 1
+        ? t("events.tomorrowsSunrise", "Tomorrow's Sunrise")
+        : t("events.sunrise", "Sunrise");
+    const sunsetLabel =
+      offset === 0
+        ? t("events.todaysSunset", "Today's Sunset")
+        : offset === 1
+        ? t("events.tomorrowsSunset", "Tomorrow's Sunset")
+        : t("events.sunset", "Sunset");
+
+    events.push({
+      label: sunriseLabel,
+      time: parseDateTime(row.date, row.sunrise),
+      isSunrise: true,
+    });
+    events.push({
+      label: sunsetLabel,
+      time: parseDateTime(row.date, row.sunset),
+      isSunrise: false,
+    });
+  }
+
+  return events
+    .filter((event) => Number.isFinite(event.time) && event.time > currentTime)
+    .sort((a, b) => a.time - b.time);
+}
+
+/**
+ * Returns the widest available widget event horizon: prefers the multi-day list
+ * pulled from the cache, and falls back to the today/tomorrow pair when the
+ * cache is unavailable so behaviour is never worse than before.
+ */
+function buildWidgetEventHorizon(todayResults, tomorrowResults, currentTime = Date.now()) {
+  const multiDay = buildWidgetUpcomingEventsMultiDay(currentTime);
+  if (multiDay.length >= 2) return multiDay;
+  return buildWidgetUpcomingEvents(todayResults, tomorrowResults, currentTime);
+}
+
 function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
   const element = document.getElementById(elementId);
   const countdownElement = document.getElementById("upcomingCountdown");
@@ -4314,7 +4387,7 @@ function displayUpcomingTimings(todayResults, tomorrowResults, elementId) {
   if (nextEvent) {
     syncNativeHomescreenWidget(
       nextEvent,
-      buildWidgetUpcomingEvents(todayRow, tomorrowRow)
+      buildWidgetEventHorizon(todayRow, tomorrowRow)
     );
   }
 
@@ -4344,7 +4417,7 @@ function refreshUpcomingTimeOnlyCardsFromCache(reason = "time-window-open") {
     if (upcomingEvents[0]) {
       syncNativeHomescreenWidget(
         upcomingEvents[0],
-        buildWidgetUpcomingEvents(cached.todayRow, cached.tomorrowRow)
+        buildWidgetEventHorizon(cached.todayRow, cached.tomorrowRow)
       );
     }
     debugLog("upcoming-time-only:refreshed", { reason });
