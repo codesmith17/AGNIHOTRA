@@ -89,7 +89,7 @@ index b2ea880..dd4fd69 100644
  import androidx.core.app.NotificationCompat;
  import com.getcapacitor.JSArray;
  import com.getcapacitor.JSObject;
-@@ -89,16 +91,36 @@ public class NotificationChannelManager {
+@@ -89,16 +91,34 @@ public class NotificationChannelManager {
                  }
              }
              String sound = channel.getString(CHANNEL_SOUND, null);
