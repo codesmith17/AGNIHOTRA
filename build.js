@@ -34,12 +34,14 @@ function escapeForInlineConfig(value) {
     .replace(/"/g, '\\"');
 }
 
-// Create public directory if it doesn't exist
+// Start from an empty public/ every time. Copying into a stale directory leaves
+// deleted modules behind, and `cap sync` then ships them inside the APK/AAB.
 const publicDir = 'public';
-if (!fs.existsSync(publicDir)) {
-    fs.mkdirSync(publicDir, { recursive: true });
-    console.log('Created public directory');
+if (fs.existsSync(publicDir)) {
+    fs.rmSync(publicDir, { recursive: true, force: true });
 }
+fs.mkdirSync(publicDir, { recursive: true });
+console.log('Cleaned public directory');
 
 // Files to copy to public directory
 const filesToCopy = [
@@ -57,10 +59,8 @@ const filesToCopy = [
     'shared/app/place-search.js',
     'shared/app/saved-places.js',
     'shared/app/runtime.js',
-    'shared/app/ota-updater.js',
     'shared/app/bottom-nav.js',
     'shared/app/page-i18n.js',
-    'shared/app/latest-release.js',
     'shared/diagnostics/instrumentation.js',
     'shared/diagnostics/payload-builder.js',
     'shared/diagnostics/support-runtime.js',

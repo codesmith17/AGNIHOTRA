@@ -104,14 +104,6 @@
       appEnvironment: "__AGNI_APP_ENV__"
     };
   </script>
-  <script>
-    (function () {
-      if (!window.AgnihotraRuntime || !window.AgnihotraRuntime.isNative) return;
-      var s = document.createElement("script");
-      s.src = "shared/app/ota-updater.js";
-      document.head.appendChild(s);
-    })();
-  </script>
   <script src="shared/app/page-i18n.js"></script>
   <script src="shared/diagnostics/instrumentation.js"></script>
   <script src="shared/diagnostics/payload-builder.js"></script>
