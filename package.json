@@ -10,7 +10,7 @@
     "dev": "nodemon cors-proxy.js",
     "cap:copy": "npm run build && npx cap copy",
     "cap:sync": "npm run build && npx cap sync",
-    "assets:android": "npx @capacitor/assets generate --android --assetPath resources",
+    "assets:android": "npx @capacitor/assets generate --android --assetPath resources --iconBackgroundColor '#FFC91B' --iconBackgroundColorDark '#FFC91B'",
     "android:sync": "npm run build && npx cap sync android",
     "android:open": "npx cap open android",
     "android:run": "npm run android:sync && npx cap run android",
