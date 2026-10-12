@@ -15,10 +15,6 @@ namespace {
     // ANTI-REVERSE-ENGINEERING & ANTI-DEBUGGING MEASURES
     // -------------------------------------------------------------------------
 
-    /**
-     * Checks /proc/self/status to detect if Frida, GDB, or LLDB is attached.
-     * When attached, TracerPid is greater than 0.
-     */
     inline bool isDebuggerAttached() __attribute__((always_inline));
     inline bool isDebuggerAttached() {
         int fd = open("/proc/self/status", O_RDONLY);
@@ -40,42 +36,68 @@ namespace {
             int tracerPid = 0;
             if (sscanf(tracerPidStr, "TracerPid:\t%d", &tracerPid) == 1) {
                 if (tracerPid > 0) {
-                    return true; // Debugger / Frida detected!
+                    return true;
                 }
             }
         }
         return false;
     }
 
-    /**
-     * Prevents external debugging tools from attaching via ptrace.
-     */
     inline void enforceAntiDebug() __attribute__((always_inline));
     inline void enforceAntiDebug() {
-        // Attempt to trace self. If another tracer is already attached, this will fail.
         #ifndef NDEBUG
-        // allow debug in developer mode if needed
+        // allow debugging in dev mode
         #else
         ptrace(PTRACE_TRACEME, 0, 1, 0);
         #endif
 
         if (isDebuggerAttached()) {
-            // Tamper detected: Exit process immediately without stack trace
             _exit(1);
         }
+    }
+
+    std::string internalCalculateDayJson(int year, int month, int day, double latitude, double longitude, double timezoneOffsetHours) {
+        DailyTimingResult result = AgnihotraTimingEngine::calculateDay(
+            year, month, day, latitude, longitude, timezoneOffsetHours
+        );
+
+        std::ostringstream json;
+        json << "{\"date\":\"" << result.date << "\","
+             << "\"sunrise\":\"" << result.sunrise << "\","
+             << "\"sunset\":\"" << result.sunset << "\","
+             << "\"isValid\":" << (result.isValid ? "true" : "false") << "}";
+        return json.str();
+    }
+
+    std::string internalCalculateRangeJson(int startYear, int startMonth, int startDay, int totalDays, double latitude, double longitude, double timezoneOffsetHours) {
+        std::vector<DailyTimingResult> results = AgnihotraTimingEngine::calculateRange(
+            startYear, startMonth, startDay, totalDays, latitude, longitude, timezoneOffsetHours
+        );
+
+        std::ostringstream json;
+        json << "{";
+        for (size_t i = 0; i < results.size(); ++i) {
+            if (i > 0) json << ",";
+            json << "\"" << results[i].date << "\":{"
+                 << "\"date\":\"" << results[i].date << "\","
+                 << "\"sunrise\":\"" << results[i].sunrise << "\","
+                 << "\"sunset\":\"" << results[i].sunset << "\"}";
+        }
+        json << "}";
+        return json.str();
     }
 }
 
 extern "C" {
 
-/**
- * JNI Export: Calculate single day timings.
- * Exported symbol is minimal and hidden from general symbol tables.
- */
+// -----------------------------------------------------------------------------
+// JNI Exports for AgnihotraNativeBridge (WebView direct bridge)
+// -----------------------------------------------------------------------------
+
 JNIEXPORT jstring JNICALL
-Java_com_eternalagni_app_AgnihotraNativeTimingPlugin_nativeCalculateDay(
+Java_com_eternalagni_app_AgnihotraNativeBridge_nativeCalculateDay(
     JNIEnv* env,
-    jobject /* thiz */,
+    jclass /* clazz */,
     jint year,
     jint month,
     jint day,
@@ -84,27 +106,14 @@ Java_com_eternalagni_app_AgnihotraNativeTimingPlugin_nativeCalculateDay(
     jdouble timezoneOffsetHours
 ) {
     enforceAntiDebug();
-
-    DailyTimingResult result = AgnihotraTimingEngine::calculateDay(
-        year, month, day, latitude, longitude, timezoneOffsetHours
-    );
-
-    std::ostringstream json;
-    json << "{\"date\":\"" << result.date << "\","
-         << "\"sunrise\":\"" << result.sunrise << "\","
-         << "\"sunset\":\"" << result.sunset << "\","
-         << "\"isValid\":" << (result.isValid ? "true" : "false") << "}";
-
-    return env->NewStringUTF(json.str().c_str());
+    std::string jsonStr = internalCalculateDayJson(year, month, day, latitude, longitude, timezoneOffsetHours);
+    return env->NewStringUTF(jsonStr.c_str());
 }
 
-/**
- * JNI Export: Calculate range of days and return compact JSON.
- */
 JNIEXPORT jstring JNICALL
-Java_com_eternalagni_app_AgnihotraNativeTimingPlugin_nativeCalculateRange(
+Java_com_eternalagni_app_AgnihotraNativeBridge_nativeCalculateRange(
     JNIEnv* env,
-    jobject /* thiz */,
+    jclass /* clazz */,
     jint startYear,
     jint startMonth,
     jint startDay,
@@ -114,23 +123,45 @@ Java_com_eternalagni_app_AgnihotraNativeTimingPlugin_nativeCalculateRange(
     jdouble timezoneOffsetHours
 ) {
     enforceAntiDebug();
+    std::string jsonStr = internalCalculateRangeJson(startYear, startMonth, startDay, totalDays, latitude, longitude, timezoneOffsetHours);
+    return env->NewStringUTF(jsonStr.c_str());
+}
 
-    std::vector<DailyTimingResult> results = AgnihotraTimingEngine::calculateRange(
-        startYear, startMonth, startDay, totalDays, latitude, longitude, timezoneOffsetHours
-    );
+// -----------------------------------------------------------------------------
+// JNI Exports for AgnihotraNativeTimingPlugin (Capacitor plugin)
+// -----------------------------------------------------------------------------
 
-    std::ostringstream json;
-    json << "{";
-    for (size_t i = 0; i < results.size(); ++i) {
-        if (i > 0) json << ",";
-        json << "\"" << results[i].date << "\":{"
-             << "\"date\":\"" << results[i].date << "\","
-             << "\"sunrise\":\"" << results[i].sunrise << "\","
-             << "\"sunset\":\"" << results[i].sunset << "\"}";
-    }
-    json << "}";
+JNIEXPORT jstring JNICALL
+Java_com_eternalagni_app_AgnihotraNativeTimingPlugin_nativeCalculateDay(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jint year,
+    jint month,
+    jint day,
+    jdouble latitude,
+    jdouble longitude,
+    jdouble timezoneOffsetHours
+) {
+    enforceAntiDebug();
+    std::string jsonStr = internalCalculateDayJson(year, month, day, latitude, longitude, timezoneOffsetHours);
+    return env->NewStringUTF(jsonStr.c_str());
+}
 
-    return env->NewStringUTF(json.str().c_str());
+JNIEXPORT jstring JNICALL
+Java_com_eternalagni_app_AgnihotraNativeTimingPlugin_nativeCalculateRange(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jint startYear,
+    jint startMonth,
+    jint startDay,
+    jint totalDays,
+    jdouble latitude,
+    jdouble longitude,
+    jdouble timezoneOffsetHours
+) {
+    enforceAntiDebug();
+    std::string jsonStr = internalCalculateRangeJson(startYear, startMonth, startDay, totalDays, latitude, longitude, timezoneOffsetHours);
+    return env->NewStringUTF(jsonStr.c_str());
 }
 
 } // extern "C"
