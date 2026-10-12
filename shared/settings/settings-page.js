@@ -171,17 +171,15 @@
             title: "Agnihotra support report",
             text: "Sharing Agnihotra support report.",
             files: [uri.uri],
-            // Keep url too for older share handlers that prefer a single uri field.
-            url: uri.uri,
             dialogTitle: "Share support report",
           };
-          await nativeShare.share({
-            ...sharePayload,
-          });
+          await nativeShare.share(sharePayload);
           setStatus(tr("support.status.shared", "Support report shared."));
           return;
         }
-      } catch (_) {}
+      } catch (err) {
+        console.error("[AGNIHOTRA][SUPPORT] Native share failed:", err);
+      }
     }
 
     try {
@@ -302,16 +300,15 @@
             title: "Email Agnihotra support report",
             text: `${shareText}\nTo: ${SUPPORT_EMAIL}`,
             files: [uri.uri],
-            url: uri.uri,
             dialogTitle: "Send support report via email",
           };
-          await nativeShare.share({
-            ...sharePayload,
-          });
+          await nativeShare.share(sharePayload);
           setStatus(tr("support.status.chooseEmailApp", "Choose Gmail/Email app. Report file is attached."));
           return;
         }
-      } catch (_) {}
+      } catch (err) {
+        console.error("[AGNIHOTRA][SUPPORT] Native email share fallback failed:", err);
+      }
     }
 
     try {
