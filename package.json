@@ -4,6 +4,7 @@
   "description": "EternalAgni Agnihotra timing app with precise sunrise/sunset times",
   "main": "index.html",
   "scripts": {
+    "agni": "node agni-android.js",
     "postinstall": "patch-package",
     "build": "node build.js",
     "start": "node cors-proxy.js",
