@@ -21,6 +21,9 @@ public class MainActivity extends BridgeActivity {
         // Ensure native C++ timing engine is injected directly into WebView
         if (getBridge() != null && getBridge().getWebView() != null) {
             getBridge().getWebView().addJavascriptInterface(new AgnihotraNativeBridge(), "AgnihotraNativeCore");
+            android.util.Log.i("AgnihotraNativeBridge", "[BRIDGE] Injected AgnihotraNativeBridge into WebView as window.AgnihotraNativeCore");
+        } else {
+            android.util.Log.w("AgnihotraNativeBridge", "[BRIDGE] Bridge or WebView was not yet ready during MainActivity.onCreate");
         }
         // Keep the device screen awake whenever the app's window is in the
         // foreground. This is automatically cleared when the activity is

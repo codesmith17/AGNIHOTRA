@@ -24,6 +24,7 @@ const PROJECT_DIR = __dirname;
 const ANDROID_DIR = path.join(PROJECT_DIR, 'android');
 const DEBUG_APK = path.join(ANDROID_DIR, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
 const UNSIGNED_RELEASE_APK = path.join(ANDROID_DIR, 'app', 'build', 'outputs', 'apk', 'release', 'app-release-unsigned.apk');
+const RELEASE_AAB = path.join(ANDROID_DIR, 'app', 'build', 'outputs', 'bundle', 'release', 'app-release.aab');
 const DEFAULT_PACKAGE = 'com.eternalagni.app';
 const DEFAULT_ACTIVITY = '.MainActivity';
 
@@ -122,6 +123,36 @@ function detectBuildToolsDir() {
   return path.join(btPath, entries[0]);
 }
 
+function detectKeytoolPath() {
+  try {
+    const whichCmd = isWindows ? 'where keytool' : 'which keytool';
+    const out = execSync(whichCmd, { stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim().split(/\r?\n/)[0];
+    if (out && fs.existsSync(out)) return out;
+  } catch (_) {}
+
+  if (process.env.JAVA_HOME) {
+    const bin = path.join(process.env.JAVA_HOME, 'bin', isWindows ? 'keytool.exe' : 'keytool');
+    if (fs.existsSync(bin)) return bin;
+  }
+
+  if (isWindows) {
+    const javaRoots = ['C:\\Program Files\\Java', 'C:\\Program Files (x86)\\Java'];
+    for (const root of javaRoots) {
+      if (fs.existsSync(root)) {
+        try {
+          const jdks = fs.readdirSync(root);
+          for (const jdk of jdks) {
+            const bin = path.join(root, jdk, 'bin', 'keytool.exe');
+            if (fs.existsSync(bin)) return bin;
+          }
+        } catch (_) {}
+      }
+    }
+  }
+  return null;
+}
+
+
 function getVersionName() {
   const buildGradle = path.join(ANDROID_DIR, 'app', 'build.gradle');
   if (fs.existsSync(buildGradle)) {
@@ -142,7 +173,10 @@ function getGitHash() {
 }
 
 function runCommand(command, args, cwd = PROJECT_DIR) {
-  const result = spawnSync(command, args, { cwd, stdio: 'inherit', shell: isWindows });
+  const isScript = typeof command === 'string' && (
+    command.endsWith('.bat') || command.endsWith('.cmd') || command === 'npm' || command === 'npx'
+  );
+  const result = spawnSync(command, args, { cwd, stdio: 'inherit', shell: isWindows ? isScript : false });
   if (result.status !== 0) {
     process.exit(result.status || 1);
   }
@@ -189,6 +223,9 @@ ${colors.bold}Core Commands:${colors.reset}
 
   ${colors.green}release-build-sign [output_name]${colors.reset}
       Builds and signs release APK in one step.
+
+  ${colors.green}release-bundle [output_name]${colors.reset}
+      Builds and signs release Android App Bundle (.aab) with upload keystore.
 
   ${colors.green}release-install <apk_path>${colors.reset}
       Installs a specific release APK.
@@ -289,6 +326,37 @@ function cmdReleaseSign(outputName) {
   runCommand(apksigner, ['verify', '--print-certs', outputPath]);
 }
 
+function cmdReleaseBundle(outputName) {
+  ensureReleaseDir();
+  logInfo('Building web assets...');
+  runCommand('npm', ['run', 'build']);
+  logInfo('Syncing Capacitor Android...');
+  runCommand('npx', ['cap', 'sync', 'android']);
+  logInfo('Compiling native C++ & assembling signed Release AAB bundle...');
+  const gradlew = isWindows ? path.join(ANDROID_DIR, 'gradlew.bat') : './gradlew';
+  runCommand(gradlew, ['bundleRelease'], ANDROID_DIR);
+
+  if (!fs.existsSync(RELEASE_AAB)) {
+    logError(`Built bundle not found at: ${RELEASE_AAB}`);
+    process.exit(1);
+  }
+
+  const version = getVersionName();
+  const finalName = outputName || `agnihotra-v${version}.aab`;
+  const destPath = path.join(PROJECT_DIR, 'release', finalName);
+
+  fs.copyFileSync(RELEASE_AAB, destPath);
+  logSuccess(`Signed Release AAB bundle created at: ${destPath}`);
+
+  const keytool = detectKeytoolPath();
+  if (keytool) {
+    try {
+      logInfo('Verifying bundle signing certificate:');
+      runCommand(keytool, ['-printcert', '-jarfile', destPath]);
+    } catch (_) {}
+  }
+}
+
 function cmdScreenshot(fileName) {
   ensureReleaseDir();
   const adb = detectAdbPath();
@@ -348,6 +416,11 @@ switch (command) {
   case 'release-build-sign':
     cmdReleaseBuild();
     cmdReleaseSign(arg1);
+    break;
+
+  case 'release-bundle':
+  case 'bundle-release':
+    cmdReleaseBundle(arg1);
     break;
 
   case 'release-install':

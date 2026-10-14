@@ -74,6 +74,9 @@ namespace {
             startYear, startMonth, startDay, totalDays, latitude, longitude, timezoneOffsetHours
         );
 
+        __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "[JNI] calculateRange: %zu days calculated for start %04d-%02d-%02d",
+            results.size(), startYear, startMonth, startDay);
+
         std::ostringstream json;
         json << "{";
         for (size_t i = 0; i < results.size(); ++i) {
@@ -89,6 +92,11 @@ namespace {
 }
 
 extern "C" {
+
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* /* vm */, void* /* reserved */) {
+    __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "[JNI] JNI_OnLoad: libagnihotra_core.so initialized successfully");
+    return JNI_VERSION_1_6;
+}
 
 // -----------------------------------------------------------------------------
 // JNI Exports for AgnihotraNativeBridge (WebView direct bridge)
