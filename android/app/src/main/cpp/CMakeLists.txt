@@ -34,11 +34,13 @@ target_compile_options(
 # Linker flags:
 # -Wl,--gc-sections: Removes unused functions and unreachable code
 # -Wl,-s: Fully strips all symbols and debug metadata
+# -Wl,-z,max-page-size=16384: Enables 16 KB memory page size support (Android 15+)
 target_link_options(
     agnihotra_core
     PRIVATE
     -Wl,--gc-sections
     -Wl,-s
+    -Wl,-z,max-page-size=16384
 )
 
 target_link_libraries(
